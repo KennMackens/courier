@@ -1,0 +1,1 @@
+* Include Python requirements in installer when distributing the app to others
