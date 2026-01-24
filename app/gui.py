@@ -1,5 +1,8 @@
 import customtkinter as ctk
+import subprocess
+import threading
 import numpy as np
+from pathlib import Path
 from typing import Callable, Optional
 
 from app.recorder import CoreAudioTapRecorder, AudioConfig
@@ -157,6 +160,9 @@ class CourierApp(ctk.CTk):
 
         self._create_widgets()
 
+        # Check audio capture permission after UI is ready
+        self.after(500, self._check_permission)
+
     def _create_widgets(self):
         """Create UI."""
         # Top bar
@@ -241,15 +247,117 @@ class CourierApp(ctk.CTk):
         self.whisper_model = model
         print(f"Settings: language={language}, model={model}")
 
+    def _check_permission(self):
+        """Check if audio capture permission is granted on startup."""
+        helper_path = Path(__file__).parent / "bin" / "courier-audio-helper"
+
+        if not helper_path.exists():
+            self._set_status("Audio helper not found", "red")
+            return
+
+        def _check():
+            try:
+                result = subprocess.run(
+                    [str(helper_path), "--check-permission"],
+                    capture_output=True,
+                    timeout=3
+                )
+                if result.returncode != 0:
+                    self.after(0, self._show_permission_dialog)
+            except subprocess.TimeoutExpired:
+                self.after(0, lambda: self._on_error("Permission check timed out"))
+            except Exception as e:
+                self.after(0, lambda: self._on_error(f"Permission check failed: {e}"))
+
+        threading.Thread(target=_check, daemon=True).start()
+
+    def _has_permission(self) -> bool:
+        """Quick check if audio capture permission is granted."""
+        helper_path = Path(__file__).parent / "bin" / "courier-audio-helper"
+        try:
+            result = subprocess.run(
+                [str(helper_path), "--check-permission"],
+                capture_output=True,
+                timeout=2
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _show_permission_dialog(self):
+        """Show dialog explaining permission requirement."""
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Permission Required")
+        dialog.geometry("450x250")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.after(100, lambda: dialog.grab_set())
+
+        main_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+        ctk.CTkLabel(
+            main_frame,
+            text="Audio Capture Permission",
+            font=ctk.CTkFont(size=16, weight="bold")
+        ).pack(pady=(0, 15))
+
+        message = (
+            "Courier needs 'Screen & System Audio Recording' permission "
+            "to capture system audio.\n\n"
+            "Please grant permission in:\n"
+            "System Settings > Privacy & Security > Screen & System Audio Recording"
+        )
+        ctk.CTkLabel(
+            main_frame,
+            text=message,
+            font=ctk.CTkFont(size=13),
+            wraplength=400,
+            justify="left"
+        ).pack(pady=(0, 20))
+
+        button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        button_frame.pack(fill="x")
+
+        ctk.CTkButton(
+            button_frame,
+            text="Open System Settings",
+            width=180,
+            command=lambda: self._open_privacy_settings()
+        ).pack(side="right", padx=(5, 0))
+
+        ctk.CTkButton(
+            button_frame,
+            text="Check Again",
+            width=120,
+            fg_color="gray",
+            command=lambda: self._recheck_permission(dialog)
+        ).pack(side="right")
+
+    def _open_privacy_settings(self):
+        """Open macOS Privacy & Security settings."""
+        subprocess.run([
+            "open",
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+        ])
+
+    def _recheck_permission(self, dialog):
+        """Re-check permission and close dialog if granted."""
+        if self._has_permission():
+            dialog.destroy()
+            self._set_status("Ready", "gray")
+
     def _toggle_recording(self):
         if not self.is_recording:
+            if not self._has_permission():
+                self._show_permission_dialog()
+                return
             self._start_recording()
         else:
             self._stop_recording()
 
     def _start_recording(self):
-        # Clear previous transcript
-        self.transcript = ""
+        # Show recording indicator in transcript area
         self.transcript_text.configure(state="normal")
         self.transcript_text.delete("1.0", "end")
         self.transcript_text.insert("1.0", "(Recording... transcript will appear when stopped)")
@@ -257,12 +365,13 @@ class CourierApp(ctk.CTk):
 
         # Start recorder
         self.recorder = CoreAudioTapRecorder(
+            config=AudioConfig(sample_rate=16000),
             on_error=lambda e: self.after(0, lambda: self._on_error(e))
         )
         self.recorder.start()
 
         self.is_recording = True
-        self._set_status("Recording", "#4caf50")
+        self._set_status("Recording system audio", "#4caf50")
         self.record_btn.configure(text="■ Stop Recording", fg_color="#4caf50", hover_color="#388e3c")
 
     def _stop_recording(self):
@@ -272,19 +381,29 @@ class CourierApp(ctk.CTk):
         self._set_status("Processing...", "#ff9800")
         self.record_btn.configure(state="disabled")
 
-        # Stop and get audio
-        audio = self.recorder.stop()
-        self.recorder = None
-        self.audio_buffer = audio
+        # Stop in background thread to avoid blocking UI during IPC
+        def _stop_async():
+            audio = self.recorder.stop()
+            self.recorder = None
+            self.after(0, lambda: self._on_recording_stopped(audio))
 
+        threading.Thread(target=_stop_async, daemon=True).start()
+
+    def _on_recording_stopped(self, audio: np.ndarray):
         self.is_recording = False
 
         if len(audio) == 0:
-            self._set_status("No audio recorded", "gray")
+            self._set_status("No audio captured", "gray")
             self.record_btn.configure(state="normal", text="● Start Recording", fg_color="#d32f2f", hover_color="#b71c1c")
             return
 
-        # Transcribe in background
+        # Append to existing audio buffer for session continuity
+        if self.audio_buffer is not None:
+            self.audio_buffer = np.concatenate([self.audio_buffer, audio])
+        else:
+            self.audio_buffer = audio
+
+        # Transcribe the new segment
         self._set_status("Transcribing...", "#ff9800")
 
         self.transcriber = Transcriber(TranscriberConfig(
@@ -299,11 +418,15 @@ class CourierApp(ctk.CTk):
         )
 
     def _on_transcription_complete(self, transcript: str):
-        self.transcript = transcript
+        # Append to existing transcript for session continuity
+        if self.transcript:
+            self.transcript += "\n\n" + transcript
+        else:
+            self.transcript = transcript
 
         self.transcript_text.configure(state="normal")
         self.transcript_text.delete("1.0", "end")
-        self.transcript_text.insert("1.0", transcript if transcript else "(No speech detected)")
+        self.transcript_text.insert("1.0", self.transcript if self.transcript else "(No speech detected)")
         self.transcript_text.configure(state="disabled")
 
         self._set_status("Ready", "gray")
