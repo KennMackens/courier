@@ -353,32 +353,48 @@ class CourierApp(ctk.CTk):
             self._set_status("Ready", "gray")
 
     def _toggle_recording(self):
+        # Disable button immediately to prevent double-clicks
+        self.record_btn.configure(state="disabled")
+
         if not self.is_recording:
-            if not self._has_permission():
-                self._show_permission_dialog()
-                return
-            self._start_recording()
+            self._set_status("Starting...", "#ff9800")
+
+            def _start_async():
+                if not self._has_permission():
+                    self.after(0, self._on_start_no_permission)
+                    return
+                recorder = CoreAudioTapRecorder(
+                    config=AudioConfig(sample_rate=16000),
+                    on_error=lambda e: self.after(0, lambda: self._on_error(e))
+                )
+                recorder.start()
+                # Only update UI if recorder actually started (process is running)
+                if recorder._process is not None:
+                    self.after(0, lambda: self._on_recording_started(recorder))
+
+            threading.Thread(target=_start_async, daemon=True).start()
         else:
             self._stop_recording()
 
-    def _start_recording(self):
-        # Show recording indicator in transcript area
+    def _on_start_no_permission(self):
+        """Handle missing permission after async check."""
+        self.record_btn.configure(state="normal")
+        self._set_status("Ready", "gray")
+        self._show_permission_dialog()
+
+    def _on_recording_started(self, recorder: CoreAudioTapRecorder):
+        """Update UI after recorder has started in background."""
+        self.recorder = recorder
+
         self.transcript_text.configure(state="normal")
         self.transcript_text.delete("1.0", "end")
         self.transcript_text.insert("1.0", "(Recording... transcript will appear when stopped)")
         self.transcript_text.configure(state="disabled")
 
-        # Start recorder
-        self.recorder = CoreAudioTapRecorder(
-            config=AudioConfig(sample_rate=16000),
-            on_error=lambda e: self.after(0, lambda: self._on_error(e))
-        )
-        self.recorder.start()
-
         self.is_recording = True
         self._recording_start_time = time.time()
         self._set_status("Recording system audio (00:00)", "#4caf50")
-        self.record_btn.configure(text="■ Stop Recording", fg_color="#4caf50", hover_color="#388e3c")
+        self.record_btn.configure(state="normal", text="■ Stop Recording", fg_color="#4caf50", hover_color="#388e3c")
         self._update_recording_time()
 
     def _update_recording_time(self):
@@ -392,10 +408,10 @@ class CourierApp(ctk.CTk):
 
     def _stop_recording(self):
         if not self.recorder:
+            self.record_btn.configure(state="normal")
             return
 
         self._set_status("Processing...", "#ff9800")
-        self.record_btn.configure(state="disabled")
 
         # Stop in background thread to avoid blocking UI during IPC
         def _stop_async():
