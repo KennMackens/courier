@@ -57,6 +57,10 @@ lipo -create \
 
 chmod +x "$OUTPUT_DIR/$BINARY_NAME"
 
+# Ad-hoc sign the universal binary (lipo invalidates per-arch signatures)
+echo "Signing universal binary (ad-hoc)..."
+codesign --force --sign - "$OUTPUT_DIR/$BINARY_NAME"
+
 # Verify universal binary
 echo ""
 echo "=== Build Complete ==="
@@ -64,6 +68,9 @@ echo "Binary: $OUTPUT_DIR/$BINARY_NAME"
 echo ""
 echo "Architectures:"
 lipo -info "$OUTPUT_DIR/$BINARY_NAME"
+echo ""
+echo "Signature:"
+codesign -dvv "$OUTPUT_DIR/$BINARY_NAME" 2>&1 | grep -E "Signature|Authority|Identifier" || true
 echo ""
 echo "Size: $(du -h "$OUTPUT_DIR/$BINARY_NAME" | cut -f1)"
 echo ""
