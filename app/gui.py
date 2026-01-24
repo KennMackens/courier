@@ -1,6 +1,7 @@
 import customtkinter as ctk
 import subprocess
 import threading
+import time
 import numpy as np
 from pathlib import Path
 from typing import Callable, Optional
@@ -371,8 +372,19 @@ class CourierApp(ctk.CTk):
         self.recorder.start()
 
         self.is_recording = True
-        self._set_status("Recording system audio", "#4caf50")
+        self._recording_start_time = time.time()
+        self._set_status("Recording system audio (00:00)", "#4caf50")
         self.record_btn.configure(text="■ Stop Recording", fg_color="#4caf50", hover_color="#388e3c")
+        self._update_recording_time()
+
+    def _update_recording_time(self):
+        """Update status bar with elapsed recording time."""
+        if self.is_recording:
+            elapsed = int(time.time() - self._recording_start_time)
+            minutes = elapsed // 60
+            seconds = elapsed % 60
+            self._set_status(f"Recording system audio ({minutes:02d}:{seconds:02d})", "#4caf50")
+            self.after(1000, self._update_recording_time)
 
     def _stop_recording(self):
         if not self.recorder:

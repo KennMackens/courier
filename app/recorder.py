@@ -48,7 +48,9 @@ class CoreAudioTapRecorder:
     def start(self) -> None:
         """Start capturing system audio."""
         if not self._helper_path.exists():
-            raise FileNotFoundError(f"Audio helper not found: {self._helper_path}")
+            if self._on_error:
+                self._on_error("Audio helper not found. Please run build_helper.sh")
+            return
 
         self._stop_event.clear()
         self._ready_event.clear()
@@ -57,13 +59,18 @@ class CoreAudioTapRecorder:
         self._actual_sample_rate = None
 
         # Spawn Swift helper process
-        self._process = subprocess.Popen(
-            [str(self._helper_path)],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=0  # Unbuffered
-        )
+        try:
+            self._process = subprocess.Popen(
+                [str(self._helper_path)],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0  # Unbuffered
+            )
+        except OSError as e:
+            if self._on_error:
+                self._on_error(f"Failed to start audio helper: {e}")
+            return
 
         # Start reader threads
         self._control_thread = threading.Thread(
@@ -78,7 +85,9 @@ class CoreAudioTapRecorder:
         # Wait for helper to signal ready
         if not self._ready_event.wait(timeout=5.0):
             self._cleanup()
-            raise TimeoutError("Audio helper did not become ready")
+            if self._on_error:
+                self._on_error("Audio helper did not become ready")
+            return
 
         # Send start command
         self._send_command({
@@ -94,13 +103,20 @@ class CoreAudioTapRecorder:
         # Send stop command
         self._send_command({"command": "stop"})
 
-        # Wait for "stopped" response
-        self._stop_event.wait(timeout=5.0)
+        # Wait with timeout
+        if not self._stop_event.wait(timeout=5.0):
+            if self._on_error:
+                self._on_error("Audio helper didn't respond to stop command")
+            self._force_kill()
 
         # Terminate helper process
         self._cleanup()
 
-        # Concatenate audio chunks
+        # Collect whatever audio we have (best-effort)
+        return self._collect_audio()
+
+    def _collect_audio(self) -> np.ndarray:
+        """Concatenate buffered audio chunks and resample if needed."""
         with self._lock:
             if not self._audio_chunks:
                 return np.array([], dtype=np.float32)
@@ -115,26 +131,48 @@ class CoreAudioTapRecorder:
 
         return audio
 
+    def _force_kill(self) -> None:
+        """Force kill the helper process."""
+        if self._process:
+            try:
+                self._process.kill()
+                self._process.wait(timeout=2.0)
+            except Exception:
+                pass
+            finally:
+                self._process = None
+
+    def __del__(self):
+        """Cleanup on garbage collection."""
+        self._cleanup()
+
     def _cleanup(self) -> None:
-        """Terminate the helper process."""
+        """Ensure helper process is terminated."""
         if self._process:
             try:
                 self._process.terminate()
-                self._process.wait(timeout=3.0)
-            except (subprocess.TimeoutExpired, OSError):
+                self._process.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
                 self._process.kill()
-            self._process = None
+                self._process.wait()
+            except Exception:
+                pass
+            finally:
+                self._process = None
 
     def _send_command(self, command: dict) -> None:
         """Send JSON command to Swift helper via stdin."""
-        if self._process and self._process.stdin:
-            try:
-                line = json.dumps(command) + "\n"
-                self._process.stdin.write(line.encode())
-                self._process.stdin.flush()
-            except (BrokenPipeError, OSError):
-                if self._on_error:
-                    self._on_error("Lost connection to audio helper")
+        if not self._process or not self._process.stdin:
+            return
+
+        try:
+            line = json.dumps(command) + "\n"
+            self._process.stdin.write(line.encode())
+            self._process.stdin.flush()
+        except (BrokenPipeError, OSError):
+            if self._on_error:
+                self._on_error("Lost connection to audio helper")
+            self._stop_event.set()
 
     def _control_reader(self) -> None:
         """Read JSON control messages from stdout."""
@@ -142,7 +180,13 @@ class CoreAudioTapRecorder:
             while self._process and not self._stop_event.is_set():
                 line = self._process.stdout.readline()
                 if not line:
-                    break  # EOF - helper exited
+                    # Helper process exited unexpectedly
+                    returncode = self._process.poll() if self._process else None
+                    if returncode is not None and returncode != 0:
+                        if self._on_error:
+                            self._on_error(f"Audio helper crashed (exit code: {returncode})")
+                    self._stop_event.set()
+                    break
 
                 try:
                     msg = json.loads(line.decode().strip())
@@ -152,6 +196,7 @@ class CoreAudioTapRecorder:
         except Exception as e:
             if self._on_error:
                 self._on_error(f"Control reader error: {e}")
+            self._stop_event.set()
 
     def _handle_control_message(self, msg: dict) -> None:
         """Handle a control message from the Swift helper."""
@@ -165,8 +210,17 @@ class CoreAudioTapRecorder:
             self._total_samples = msg.get("totalSamples", 0)
             self._stop_event.set()
         elif msg_type == "error":
+            error_code = msg.get("code", "UNKNOWN")
+            error_message = msg.get("message", "Unknown error")
+
+            if error_code == "PERMISSION_DENIED":
+                error_message = "Audio capture permission denied. Please grant in System Settings."
+            elif error_code == "DEVICE_ERROR":
+                error_message = "Failed to create audio capture device."
+
             if self._on_error:
-                self._on_error(msg.get("message", "Unknown error"))
+                self._on_error(error_message)
+            self._stop_event.set()
 
     def _audio_reader(self) -> None:
         """Read binary audio data from stderr."""
@@ -179,10 +233,19 @@ class CoreAudioTapRecorder:
 
                 chunk_size = struct.unpack(">I", size_bytes)[0]
 
+                # Sanity check: skip empty or unreasonably large chunks
+                # Max ~10 seconds at 48kHz float32 mono
+                if chunk_size == 0 or chunk_size > 48000 * 4 * 10:
+                    continue
+
                 # Read audio data
                 audio_bytes = self._read_exact(self._process.stderr, chunk_size)
                 if not audio_bytes:
                     break
+
+                # Verify float32 alignment
+                if len(audio_bytes) % 4 != 0:
+                    continue
 
                 # Convert to numpy float32 array
                 chunk = np.frombuffer(audio_bytes, dtype=np.float32)

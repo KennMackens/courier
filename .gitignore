@@ -23,5 +23,10 @@ transcripts/
 .DS_Store
 Thumbs.db
 
+# Swift Package Manager
+courier-audio-helper/.build/
+courier-audio-helper/.swiftpm/
+courier-audio-helper/Package.resolved
+
 # Claude
 .claude/
