@@ -264,6 +264,9 @@ class CourierApp(ctk.CTk):
                     timeout=3
                 )
                 if result.returncode != 0:
+                    stderr_output = result.stderr.decode(errors="replace").strip()
+                    if stderr_output:
+                        print(f"[Courier] Permission check failed: {stderr_output}")
                     self.after(0, self._show_permission_dialog)
             except subprocess.TimeoutExpired:
                 self.after(0, lambda: self._on_error("Permission check timed out"))
@@ -307,7 +310,8 @@ class CourierApp(ctk.CTk):
             "Courier needs 'Screen & System Audio Recording' permission "
             "to capture system audio.\n\n"
             "Please grant permission in:\n"
-            "System Settings > Privacy & Security > Screen & System Audio Recording"
+            "System Settings > Privacy & Security > Screen & System Audio Recording\n\n"
+            "After granting permission, restart Terminal for changes to take effect."
         )
         ctk.CTkLabel(
             main_frame,
