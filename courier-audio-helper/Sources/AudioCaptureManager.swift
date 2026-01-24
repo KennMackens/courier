@@ -19,6 +19,7 @@ class AudioCaptureManager {
 
     var isCapturing: Bool { _isCapturing }
     var actualSampleRate: Double = 48000.0
+    var channelsPerFrame: Int = 2
 
     func start() throws {
         guard !_isCapturing else {
@@ -85,6 +86,7 @@ class AudioCaptureManager {
         )
         if formatStatus == noErr {
             self.actualSampleRate = format.mSampleRate
+            self.channelsPerFrame = Int(format.mChannelsPerFrame)
         }
 
         // 6. Register IO proc callback

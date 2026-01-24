@@ -41,7 +41,8 @@ class IPCHandler: AudioCaptureDelegate {
             try captureManager.start()
             sendResponse([
                 "type": "started",
-                "actualSampleRate": captureManager.actualSampleRate
+                "actualSampleRate": captureManager.actualSampleRate,
+                "channels": captureManager.channelsPerFrame
             ])
 
         case "stop":

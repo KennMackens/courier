@@ -43,6 +43,7 @@ class CoreAudioTapRecorder:
 
         # State
         self._actual_sample_rate: Optional[float] = None
+        self._channels: int = 1
         self._total_samples: int = 0
 
     def start(self) -> None:
@@ -116,11 +117,17 @@ class CoreAudioTapRecorder:
         return self._collect_audio()
 
     def _collect_audio(self) -> np.ndarray:
-        """Concatenate buffered audio chunks and resample if needed."""
+        """Concatenate buffered audio chunks, downmix to mono, and resample."""
         with self._lock:
             if not self._audio_chunks:
                 return np.array([], dtype=np.float32)
             audio = np.concatenate(self._audio_chunks)
+
+        # Downmix interleaved stereo to mono
+        if self._channels > 1:
+            # Trim to multiple of channel count
+            trim = len(audio) - (len(audio) % self._channels)
+            audio = audio[:trim].reshape(-1, self._channels).mean(axis=1).astype(np.float32)
 
         # Resample if needed
         if self._actual_sample_rate and self._actual_sample_rate != self._config.sample_rate:
@@ -206,6 +213,7 @@ class CoreAudioTapRecorder:
             self._ready_event.set()
         elif msg_type == "started":
             self._actual_sample_rate = msg.get("actualSampleRate")
+            self._channels = msg.get("channels", 2)
         elif msg_type == "stopped":
             self._total_samples = msg.get("totalSamples", 0)
             self._stop_event.set()
@@ -267,11 +275,19 @@ class CoreAudioTapRecorder:
             data += chunk
         return data
 
-    def _resample(self, audio: np.ndarray, orig_sr: float, target_sr: float) -> np.ndarray:
-        """Resample audio using linear interpolation."""
+    @staticmethod
+    def _resample(audio: np.ndarray, orig_sr: float, target_sr: float) -> np.ndarray:
+        """Resample audio with proper anti-aliasing filter."""
         if orig_sr == target_sr:
             return audio
-        ratio = target_sr / orig_sr
-        new_length = int(len(audio) * ratio)
-        indices = np.linspace(0, len(audio) - 1, new_length)
-        return np.interp(indices, np.arange(len(audio)), audio).astype(np.float32)
+        from math import gcd
+        from scipy.signal import resample_poly
+
+        # Compute integer up/down factors
+        orig = int(orig_sr)
+        target = int(target_sr)
+        divisor = gcd(orig, target)
+        up = target // divisor
+        down = orig // divisor
+
+        return resample_poly(audio, up, down).astype(np.float32)
