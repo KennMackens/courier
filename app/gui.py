@@ -148,6 +148,7 @@ class CourierApp(ctk.CTk):
 
         # State
         self.is_recording = False
+        self.is_transcribing = False
         self.language = "nl"  # Default to Dutch
         self.whisper_model = "medium"
         self.settings_window = None
@@ -183,31 +184,20 @@ class CourierApp(ctk.CTk):
         # Settings button
         ctk.CTkButton(top_frame, text="⚙ Settings", width=100, command=self._open_settings).pack(side="right", padx=5)
 
-        # Main content - split view
-        content_frame = ctk.CTkFrame(self, fg_color="transparent")
-        content_frame.pack(fill="both", expand=True, padx=10, pady=5)
-        content_frame.grid_columnconfigure(0, weight=1)
-        content_frame.grid_columnconfigure(1, weight=1)
-        content_frame.grid_rowconfigure(0, weight=1)
-
-        # Left: User notes
-        notes_frame = ctk.CTkFrame(content_frame)
-        notes_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        # Main content - full-width notes
+        notes_frame = ctk.CTkFrame(self)
+        notes_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
         ctk.CTkLabel(notes_frame, text="Your Notes", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
 
         self.user_notes = ctk.CTkTextbox(notes_frame, font=ctk.CTkFont(size=13), wrap="word")
         self.user_notes.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
-        # Right: Transcript
-        transcript_frame = ctk.CTkFrame(content_frame)
-        transcript_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
-
-        ctk.CTkLabel(transcript_frame, text="Transcript (after recording)", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
-
-        self.transcript_text = ctk.CTkTextbox(transcript_frame, font=ctk.CTkFont(size=13), wrap="word", text_color="gray70")
-        self.transcript_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-        self.transcript_text.configure(state="disabled")
+        # Transcription spinner (hidden by default)
+        self.spinner_label = ctk.CTkLabel(
+            notes_frame, text="Transcribing...",
+            font=ctk.CTkFont(size=12), text_color="#ff9800"
+        )
 
         # Bottom controls
         controls_frame = ctk.CTkFrame(self)
@@ -227,7 +217,19 @@ class CourierApp(ctk.CTk):
             fg_color="#1976d2", hover_color="#1565c0",
             command=self._enhance_notes
         )
-        self.enhance_btn.pack(side="right", fill="x", expand=True, padx=(5, 0))
+        self.enhance_btn.pack(side="left", fill="x", expand=True, padx=5)
+
+        self.end_meeting_btn = ctk.CTkButton(
+            controls_frame, text="End Meeting",
+            font=ctk.CTkFont(size=16, weight="bold"), height=50,
+            fg_color="#616161", hover_color="#424242",
+            command=self._end_meeting
+        )
+        self.end_meeting_btn.pack(side="right", fill="x", expand=True, padx=(5, 0))
+
+        # Initially hide enhance and end meeting buttons (shown after first recording)
+        self.enhance_btn.pack_forget()
+        self.end_meeting_btn.pack_forget()
 
     def _set_status(self, status: str, color: str = "gray"):
         self.status_label.configure(text=status)
@@ -385,16 +387,15 @@ class CourierApp(ctk.CTk):
     def _on_recording_started(self, recorder: CoreAudioTapRecorder):
         """Update UI after recorder has started in background."""
         self.recorder = recorder
-
-        self.transcript_text.configure(state="normal")
-        self.transcript_text.delete("1.0", "end")
-        self.transcript_text.insert("1.0", "(Recording... transcript will appear when stopped)")
-        self.transcript_text.configure(state="disabled")
-
         self.is_recording = True
         self._recording_start_time = time.time()
         self._set_status("Recording system audio (00:00)", "#4caf50")
         self.record_btn.configure(state="normal", text="■ Stop Recording", fg_color="#4caf50", hover_color="#388e3c")
+
+        # Hide action buttons during recording
+        self.enhance_btn.pack_forget()
+        self.end_meeting_btn.pack_forget()
+
         self._update_recording_time()
 
     def _update_recording_time(self):
@@ -423,10 +424,11 @@ class CourierApp(ctk.CTk):
 
     def _on_recording_stopped(self, audio: np.ndarray):
         self.is_recording = False
+        self.record_btn.configure(state="normal", text="● Start Recording", fg_color="#d32f2f", hover_color="#b71c1c")
 
         if len(audio) == 0:
             self._set_status("No audio captured", "gray")
-            self.record_btn.configure(state="normal", text="● Start Recording", fg_color="#d32f2f", hover_color="#b71c1c")
+            self._show_session_buttons()
             return
 
         # Append to existing audio buffer for session continuity
@@ -435,8 +437,12 @@ class CourierApp(ctk.CTk):
         else:
             self.audio_buffer = audio
 
-        # Transcribe the new segment
+        # Show spinner and transcribe in background
+        self.is_transcribing = True
         self._set_status("Transcribing...", "#ff9800")
+        self.spinner_label.pack(pady=(0, 10))
+
+        self._show_session_buttons()
 
         self.transcriber = Transcriber(TranscriberConfig(
             model_size=self.whisper_model,
@@ -446,27 +452,38 @@ class CourierApp(ctk.CTk):
         self.transcriber.transcribe_async(
             audio,
             on_complete=lambda t: self.after(0, lambda: self._on_transcription_complete(t)),
-            on_error=lambda e: self.after(0, lambda: self._on_error(e))
+            on_error=lambda e: self.after(0, lambda: self._on_transcription_error(e))
         )
 
     def _on_transcription_complete(self, transcript: str):
+        self.is_transcribing = False
+        self.spinner_label.pack_forget()
+
         # Append to existing transcript for session continuity
         if self.transcript:
             self.transcript += "\n\n" + transcript
         else:
             self.transcript = transcript
 
-        self.transcript_text.configure(state="normal")
-        self.transcript_text.delete("1.0", "end")
-        self.transcript_text.insert("1.0", self.transcript if self.transcript else "(No speech detected)")
-        self.transcript_text.configure(state="disabled")
-
         self._set_status("Ready", "gray")
-        self.record_btn.configure(state="normal", text="● Start Recording", fg_color="#d32f2f", hover_color="#b71c1c")
+
+    def _on_transcription_error(self, error: str):
+        self.is_transcribing = False
+        self.spinner_label.pack_forget()
+        self._set_status(f"Transcription error: {error}", "red")
 
     def _on_error(self, error: str):
         self._set_status(f"Error: {error}", "red")
         self.record_btn.configure(state="normal", text="● Start Recording", fg_color="#d32f2f", hover_color="#b71c1c")
+        self._show_session_buttons()
+
+    def _show_session_buttons(self):
+        """Show enhance and end meeting buttons if session has content."""
+        if self.transcript or self.audio_buffer is not None:
+            if not self.enhance_btn.winfo_manager():
+                self.enhance_btn.pack(side="left", fill="x", expand=True, padx=5)
+            if not self.end_meeting_btn.winfo_manager():
+                self.end_meeting_btn.pack(side="right", fill="x", expand=True, padx=(5, 0))
 
     def _enhance_notes(self):
         user_notes = self.user_notes.get("1.0", "end").strip()
@@ -504,6 +521,89 @@ class CourierApp(ctk.CTk):
         self.enhance_btn.configure(state="normal")
         if self.notes_window:
             self.notes_window.set_status(f"Error: {error}")
+
+    def _end_meeting(self):
+        """End the meeting session with save/copy prompt."""
+        user_notes = self.user_notes.get("1.0", "end").strip()
+
+        if not user_notes and not self.transcript:
+            self._reset_session()
+            return
+
+        self._show_end_meeting_dialog(user_notes)
+
+    def _show_end_meeting_dialog(self, notes: str):
+        """Show dialog to copy notes or transcript before ending."""
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("End Meeting")
+        dialog.geometry("400x220")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.after(100, lambda: dialog.grab_set())
+
+        main_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+        ctk.CTkLabel(
+            main_frame, text="End Meeting",
+            font=ctk.CTkFont(size=16, weight="bold")
+        ).pack(pady=(0, 10))
+
+        ctk.CTkLabel(
+            main_frame,
+            text="Would you like to copy your notes or transcript\nto the clipboard before ending?",
+            font=ctk.CTkFont(size=13),
+            justify="center"
+        ).pack(pady=(0, 20))
+
+        button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        button_frame.pack(fill="x")
+
+        def copy_notes():
+            self.clipboard_clear()
+            self.clipboard_append(notes)
+            dialog.destroy()
+            self._reset_session()
+
+        def copy_transcript():
+            self.clipboard_clear()
+            self.clipboard_append(self.transcript)
+            dialog.destroy()
+            self._reset_session()
+
+        def discard():
+            dialog.destroy()
+            self._reset_session()
+
+        ctk.CTkButton(
+            button_frame, text="Copy Notes", width=110,
+            command=copy_notes
+        ).pack(side="left", padx=(0, 5))
+
+        if self.transcript:
+            ctk.CTkButton(
+                button_frame, text="Copy Transcript", width=130,
+                fg_color="#616161", hover_color="#424242",
+                command=copy_transcript
+            ).pack(side="left", padx=5)
+
+        ctk.CTkButton(
+            button_frame, text="Discard", width=80,
+            fg_color="#d32f2f", hover_color="#b71c1c",
+            command=discard
+        ).pack(side="right")
+
+    def _reset_session(self):
+        """Clear all session data and reset UI."""
+        self.audio_buffer = None
+        self.transcript = ""
+        self.user_notes.delete("1.0", "end")
+
+        # Hide session buttons
+        self.enhance_btn.pack_forget()
+        self.end_meeting_btn.pack_forget()
+
+        self._set_status("Ready", "gray")
 
     def run(self):
         self.mainloop()
