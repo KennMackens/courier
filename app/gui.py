@@ -1,9 +1,8 @@
 import customtkinter as ctk
-import sounddevice as sd
 import numpy as np
 from typing import Callable, Optional
 
-from app.recorder import AudioRecorder, AudioConfig
+from app.recorder import CoreAudioTapRecorder, AudioConfig
 from app.transcriber import Transcriber, TranscriberConfig, WHISPER_MODELS
 from app.ollama import NotesGenerator, OllamaConfig
 
@@ -20,29 +19,23 @@ SUPPORTED_LANGUAGES = [
 
 
 class SettingsModal(ctk.CTkToplevel):
-    """Settings modal for device, language, and model selection."""
+    """Settings modal for language and model selection."""
 
     def __init__(self, parent, on_save: Optional[Callable] = None,
-                 current_language: str = "nl", current_model: str = "medium",
-                 current_device: Optional[int] = None):
+                 current_language: str = "nl", current_model: str = "medium"):
         super().__init__(parent)
         self.on_save = on_save
         self.current_language = current_language
         self.current_model = current_model
-        self.current_device = current_device
 
         self.title("Settings")
-        self.geometry("500x350")
+        self.geometry("500x280")
         self.resizable(False, False)
 
         self.transient(parent)
 
         # Delay grab_set() until window is visible to prevent macOS crash
         self.after(100, self._safe_grab)
-
-        # Get available audio devices
-        self.devices = self._get_input_devices()
-        device_names = [d["name"] for d in self.devices]
 
         # Main frame
         main_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -55,28 +48,6 @@ class SettingsModal(ctk.CTkToplevel):
             font=ctk.CTkFont(size=18, weight="bold")
         )
         title_label.pack(pady=(0, 20))
-
-        # Microphone selection
-        mic_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        mic_frame.pack(fill="x", pady=5)
-
-        ctk.CTkLabel(mic_frame, text="Microphone:", font=ctk.CTkFont(size=14)).pack(anchor="w")
-        self.mic_dropdown = ctk.CTkComboBox(
-            mic_frame,
-            values=device_names if device_names else ["No devices found"],
-            width=450,
-            state="readonly" if device_names else "disabled"
-        )
-        self.mic_dropdown.pack(pady=(5, 0))
-
-        # Set current device
-        if current_device is not None:
-            for d in self.devices:
-                if d["index"] == current_device:
-                    self.mic_dropdown.set(d["name"])
-                    break
-        elif device_names:
-            self.mic_dropdown.set(device_names[0])
 
         # Language selection
         lang_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
@@ -115,23 +86,8 @@ class SettingsModal(ctk.CTkToplevel):
             self.grab_set()
             self.focus_force()
 
-    def _get_input_devices(self) -> list:
-        """Get list of available input audio devices."""
-        devices = []
-        try:
-            all_devices = sd.query_devices()
-            for i, device in enumerate(all_devices):
-                if device["max_input_channels"] > 0:
-                    devices.append({"index": i, "name": device["name"]})
-        except Exception as e:
-            print(f"Error querying devices: {e}")
-        return devices
-
     def _save_settings(self):
         """Save settings and close."""
-        mic_name = self.mic_dropdown.get()
-        mic_device = next((d["index"] for d in self.devices if d["name"] == mic_name), None)
-
         lang_name = self.lang_dropdown.get()
         language = next((code for name, code in SUPPORTED_LANGUAGES if name == lang_name), "nl")
 
@@ -139,7 +95,7 @@ class SettingsModal(ctk.CTkToplevel):
         model = next((code for code, desc in WHISPER_MODELS if desc == model_name), "medium")
 
         if self.on_save:
-            self.on_save(mic_device, language, model)
+            self.on_save(language, model)
         self.destroy()
 
 
@@ -188,14 +144,13 @@ class CourierApp(ctk.CTk):
 
         # State
         self.is_recording = False
-        self.mic_device: Optional[int] = None
         self.language = "nl"  # Default to Dutch
         self.whisper_model = "medium"
         self.settings_window = None
         self.notes_window = None
 
         # Components
-        self.recorder: Optional[AudioRecorder] = None
+        self.recorder: Optional[CoreAudioTapRecorder] = None
         self.transcriber: Optional[Transcriber] = None
         self.audio_buffer: Optional[np.ndarray] = None
         self.transcript: str = ""
@@ -276,23 +231,18 @@ class CourierApp(ctk.CTk):
             self.settings_window = SettingsModal(
                 self, on_save=self._on_settings_save,
                 current_language=self.language,
-                current_model=self.whisper_model,
-                current_device=self.mic_device
+                current_model=self.whisper_model
             )
         else:
             self.settings_window.focus()
 
-    def _on_settings_save(self, mic_device, language, model):
-        self.mic_device = mic_device
+    def _on_settings_save(self, language, model):
         self.language = language
         self.whisper_model = model
-        print(f"Settings: device={mic_device}, language={language}, model={model}")
+        print(f"Settings: language={language}, model={model}")
 
     def _toggle_recording(self):
         if not self.is_recording:
-            if self.mic_device is None:
-                self._open_settings()
-                return
             self._start_recording()
         else:
             self._stop_recording()
@@ -306,8 +256,7 @@ class CourierApp(ctk.CTk):
         self.transcript_text.configure(state="disabled")
 
         # Start recorder
-        self.recorder = AudioRecorder(
-            device_index=self.mic_device,
+        self.recorder = CoreAudioTapRecorder(
             on_error=lambda e: self.after(0, lambda: self._on_error(e))
         )
         self.recorder.start()
