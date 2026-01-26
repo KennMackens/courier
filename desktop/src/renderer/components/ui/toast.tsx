@@ -4,14 +4,16 @@ import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const toastVariants = cva(
-  "group pointer-events-auto relative flex w-full items-center justify-between space-x-4 overflow-hidden rounded-md border p-6 pr-8 shadow-lg transition-all",
+  "group pointer-events-auto relative flex w-full items-center justify-between space-x-4 overflow-hidden rounded-lg border p-4 pr-8 shadow-md transition-all animate-slide-in-from-bottom",
   {
     variants: {
       variant: {
-        default: "border bg-background text-foreground",
-        destructive:
-          "destructive group border-destructive bg-destructive text-destructive-foreground",
-        success: "border-primary-7 bg-primary-3 text-primary-11",
+        // Default: neutral with hairline border
+        default: "border-slate-6 bg-background text-foreground",
+        // Destructive: red tinted
+        destructive: "border-red-6 bg-red-2 text-red-12",
+        // Success: jade tinted
+        success: "border-primary-6 bg-primary-2 text-primary-12",
       },
     },
     defaultVariants: {
@@ -38,7 +40,7 @@ const Toast = React.forwardRef<HTMLDivElement, ToastProps>(
         {onClose && (
           <button
             onClick={onClose}
-            className="absolute right-2 top-2 rounded-md p-1 text-foreground/50 opacity-0 transition-opacity hover:text-foreground focus:opacity-100 focus:outline-none focus:ring-2 group-hover:opacity-100"
+            className="absolute right-2 top-2 rounded-md p-1 text-slate-9 opacity-0 transition-opacity hover:text-slate-12 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-primary-7 group-hover:opacity-100"
           >
             <X className="h-4 w-4" />
           </button>
@@ -67,7 +69,7 @@ const ToastDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("text-sm opacity-90", className)}
+    className={cn("text-sm text-slate-11", className)}
     {...props}
   />
 ))

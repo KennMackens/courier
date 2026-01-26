@@ -3,17 +3,21 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const alertVariants = cva(
-  "relative w-full rounded-lg border p-4 [&>svg~*]:pl-7 [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg]:text-foreground",
+  "relative w-full rounded-lg border p-4 [&>svg~*]:pl-7 [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4",
   {
     variants: {
       variant: {
-        default: "bg-background text-foreground",
+        // Default: neutral background with subtle border
+        default: "bg-slate-2 border-slate-6 text-slate-12 [&>svg]:text-slate-11",
+        // Destructive: red tinted background
         destructive:
-          "border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive",
+          "bg-red-2 border-red-6 text-red-12 [&>svg]:text-red-11",
+        // Success: jade tinted background
         success:
-          "border-primary-7/50 text-primary-11 dark:border-primary-7 [&>svg]:text-primary-11",
+          "bg-primary-2 border-primary-6 text-primary-12 [&>svg]:text-primary-11",
+        // Warning: amber/yellow tinted background
         warning:
-          "border-yellow-500/50 text-yellow-600 dark:border-yellow-500 dark:text-yellow-500 [&>svg]:text-yellow-600 dark:[&>svg]:text-yellow-500",
+          "bg-amber-50 border-amber-200 text-amber-900 dark:bg-amber-950/50 dark:border-amber-800 dark:text-amber-200 [&>svg]:text-amber-600 dark:[&>svg]:text-amber-400",
       },
     },
     defaultVariants: {
