@@ -294,7 +294,7 @@ class CourierApp(ctk.CTk):
         """Show dialog explaining permission requirement."""
         dialog = ctk.CTkToplevel(self)
         dialog.title("Permission Required")
-        dialog.geometry("450x250")
+        dialog.geometry("450x320")
         dialog.resizable(False, False)
         dialog.transient(self)
         dialog.after(100, lambda: dialog.grab_set())
@@ -309,11 +309,12 @@ class CourierApp(ctk.CTk):
         ).pack(pady=(0, 15))
 
         message = (
-            "Courier needs 'Screen & System Audio Recording' permission "
-            "to capture system audio.\n\n"
-            "Please grant permission in:\n"
-            "System Settings > Privacy & Security > Screen & System Audio Recording\n\n"
-            "After granting permission, restart Terminal for changes to take effect."
+            "Courier needs permissions to record meetings:\n\n"
+            "1. Screen & System Audio Recording (required)\n"
+            "   For capturing system audio from meetings\n\n"
+            "2. Microphone (recommended)\n"
+            "   For capturing your voice\n\n"
+            "After granting permissions, restart Terminal for changes to take effect."
         )
         ctk.CTkLabel(
             main_frame,
@@ -328,24 +329,40 @@ class CourierApp(ctk.CTk):
 
         ctk.CTkButton(
             button_frame,
-            text="Open System Settings",
-            width=180,
+            text="Screen Recording",
+            width=140,
             command=lambda: self._open_privacy_settings()
-        ).pack(side="right", padx=(5, 0))
+        ).pack(side="left", padx=(0, 5))
+
+        ctk.CTkButton(
+            button_frame,
+            text="Microphone",
+            width=100,
+            fg_color="#616161",
+            hover_color="#424242",
+            command=lambda: self._open_microphone_settings()
+        ).pack(side="left", padx=5)
 
         ctk.CTkButton(
             button_frame,
             text="Check Again",
-            width=120,
+            width=100,
             fg_color="gray",
             command=lambda: self._recheck_permission(dialog)
         ).pack(side="right")
 
     def _open_privacy_settings(self):
-        """Open macOS Privacy & Security settings."""
+        """Open macOS Privacy & Security settings for Screen Recording."""
         subprocess.run([
             "open",
             "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+        ])
+
+    def _open_microphone_settings(self):
+        """Open macOS Privacy & Security settings for Microphone."""
+        subprocess.run([
+            "open",
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
         ])
 
     def _recheck_permission(self, dialog):
@@ -367,7 +384,8 @@ class CourierApp(ctk.CTk):
                     return
                 recorder = CoreAudioTapRecorder(
                     config=AudioConfig(sample_rate=16000),
-                    on_error=lambda e: self.after(0, lambda: self._on_error(e))
+                    on_error=lambda e: self.after(0, lambda: self._on_error(e)),
+                    on_warning=lambda w: self.after(0, lambda: self._on_warning(w))
                 )
                 recorder.start()
                 # Only update UI if recorder actually started (process is running)
@@ -476,6 +494,16 @@ class CourierApp(ctk.CTk):
         self._set_status(f"Error: {error}", "red")
         self.record_btn.configure(state="normal", text="● Start Recording", fg_color="#d32f2f", hover_color="#b71c1c")
         self._show_session_buttons()
+
+    def _on_warning(self, warning: str):
+        """Handle non-fatal warnings (e.g., microphone unavailable)."""
+        # Briefly show warning in status, but continue recording
+        if self.is_recording:
+            # Update status to indicate mic issue but keep recording indicator
+            current_status = self.status_label.cget("text")
+            if "Recording" in current_status:
+                self._set_status("Recording (mic unavailable)", "#ff9800")
+                # Status will be updated by timer anyway
 
     def _show_session_buttons(self):
         """Show enhance and end meeting buttons if session has content."""

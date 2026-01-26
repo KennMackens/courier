@@ -1,10 +1,12 @@
 import Foundation
 import CoreAudio
 import AudioToolbox
+import AVFoundation
 
 protocol AudioCaptureDelegate: AnyObject {
     func didCaptureAudio(data: Data, frameCount: UInt32)
     func didEncounterError(_ error: Error)
+    func didEncounterWarning(_ message: String, code: String)
 }
 
 class AudioCaptureManager {
@@ -17,9 +19,18 @@ class AudioCaptureManager {
     private var _isCapturing = false
     private var totalSamplesCaptured: Int = 0
 
+    // Microphone capture
+    private var microphoneManager: MicrophoneCaptureManager?
+    private var micRingBuffer: RingBuffer?
+    private var _isMicrophoneActive = false
+
     var isCapturing: Bool { _isCapturing }
+    var isMicrophoneActive: Bool { _isMicrophoneActive }
     var actualSampleRate: Double = 48000.0
     var channelsPerFrame: Int = 2
+
+    /// Mix ratio for audio (0.5 = 50% system audio, 50% microphone)
+    private let mixRatio: Float = 0.5
 
     func start() throws {
         guard !_isCapturing else {
@@ -120,6 +131,31 @@ class AudioCaptureManager {
 
         _isCapturing = true
         totalSamplesCaptured = 0
+
+        // 8. Start microphone capture (non-blocking on failure)
+        startMicrophoneCapture()
+    }
+
+    /// Start microphone capture. Failures are non-fatal - system audio continues.
+    private func startMicrophoneCapture() {
+        // Create ring buffer with ~100ms capacity at 48kHz stereo
+        let bufferCapacity = Int(actualSampleRate) * channelsPerFrame / 10  // 100ms
+        let ringBuffer = RingBuffer(capacity: bufferCapacity)
+        self.micRingBuffer = ringBuffer
+
+        let micManager = MicrophoneCaptureManager(ringBuffer: ringBuffer)
+        self.microphoneManager = micManager
+
+        do {
+            try micManager.start()
+            _isMicrophoneActive = true
+        } catch let error as MicrophoneError {
+            _isMicrophoneActive = false
+            delegate?.didEncounterWarning(error.description, code: error.code)
+        } catch {
+            _isMicrophoneActive = false
+            delegate?.didEncounterWarning("Microphone capture failed: \(error.localizedDescription)", code: "MICROPHONE_ERROR")
+        }
     }
 
     func stop() throws -> Int {
@@ -157,6 +193,11 @@ class AudioCaptureManager {
         return false
     }
 
+    /// Check if microphone permission is granted.
+    func checkMicrophonePermission() -> Bool {
+        return MicrophoneCaptureManager.checkPermission()
+    }
+
     // MARK: - Private
 
     private func handleAudioCallback(bufferList: UnsafePointer<AudioBufferList>) {
@@ -176,16 +217,48 @@ class AudioCaptureManager {
                     continue
                 }
 
-                let frameCount = buffer.mDataByteSize / UInt32(MemoryLayout<Float32>.size)
-                totalSamplesCaptured += Int(frameCount)
+                let sampleCount = Int(buffer.mDataByteSize) / MemoryLayout<Float32>.size
+                let frameCount = UInt32(sampleCount)
+                totalSamplesCaptured += sampleCount
 
-                let data = Data(bytes: dataPointer, count: Int(buffer.mDataByteSize))
-                delegate?.didCaptureAudio(data: data, frameCount: frameCount)
+                // Get system audio samples
+                let systemSamples = dataPointer.bindMemory(to: Float32.self, capacity: sampleCount)
+
+                // Try to mix with microphone audio
+                if _isMicrophoneActive, let micBuffer = micRingBuffer {
+                    if let micSamples = micBuffer.read(count: sampleCount) {
+                        // Mix system audio and microphone at 50/50
+                        var mixedSamples = [Float32](repeating: 0, count: sampleCount)
+                        for i in 0..<sampleCount {
+                            mixedSamples[i] = mixRatio * systemSamples[i] + mixRatio * micSamples[i]
+                        }
+                        let data = Data(bytes: mixedSamples, count: sampleCount * MemoryLayout<Float32>.size)
+                        delegate?.didCaptureAudio(data: data, frameCount: frameCount)
+                    } else {
+                        // Mic buffer underflow - send system audio only (scaled by mix ratio for consistency)
+                        var scaledSamples = [Float32](repeating: 0, count: sampleCount)
+                        for i in 0..<sampleCount {
+                            scaledSamples[i] = systemSamples[i]
+                        }
+                        let data = Data(bytes: scaledSamples, count: sampleCount * MemoryLayout<Float32>.size)
+                        delegate?.didCaptureAudio(data: data, frameCount: frameCount)
+                    }
+                } else {
+                    // No microphone - send system audio only
+                    let data = Data(bytes: dataPointer, count: Int(buffer.mDataByteSize))
+                    delegate?.didCaptureAudio(data: data, frameCount: frameCount)
+                }
             }
         }
     }
 
     private func cleanup() {
+        // Stop microphone capture first
+        microphoneManager?.stop()
+        microphoneManager = nil
+        micRingBuffer = nil
+        _isMicrophoneActive = false
+
         // Stop device
         if let procID = ioProcID, aggregateDeviceID != AudioDeviceID(kAudioObjectUnknown) {
             AudioDeviceStop(aggregateDeviceID, procID)

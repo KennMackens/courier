@@ -12,8 +12,16 @@ if CommandLine.arguments.contains("--version") {
 // Handle --check-permission flag
 if CommandLine.arguments.contains("--check-permission") {
     let manager = AudioCaptureManager()
-    let granted = manager.checkPermission()
-    exit(granted ? 0 : 1)
+    let screenGranted = manager.checkPermission()
+    let micGranted = manager.checkMicrophonePermission()
+
+    // Output mic status to stdout for Python to parse
+    if screenGranted {
+        print(micGranted ? "mic:granted" : "mic:denied")
+        exit(0)
+    } else {
+        exit(1)
+    }
 }
 
 // Set up signal handlers for graceful shutdown

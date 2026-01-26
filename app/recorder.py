@@ -25,9 +25,11 @@ class CoreAudioTapRecorder:
     """macOS native system audio capture using Core Audio Taps via Swift helper."""
 
     def __init__(self, config: AudioConfig = AudioConfig(),
-                 on_error: Optional[Callable[[str], None]] = None):
+                 on_error: Optional[Callable[[str], None]] = None,
+                 on_warning: Optional[Callable[[str], None]] = None):
         self._config = config
         self._on_error = on_error
+        self._on_warning = on_warning
         self._helper_path = Path(__file__).parent / "bin" / "courier-audio-helper"
 
         # Process and threading
@@ -45,6 +47,12 @@ class CoreAudioTapRecorder:
         self._actual_sample_rate: Optional[float] = None
         self._channels: int = 1
         self._total_samples: int = 0
+        self._microphone_active: bool = False
+
+    @property
+    def microphone_active(self) -> bool:
+        """Whether microphone is being captured (for UI indication)."""
+        return self._microphone_active
 
     def start(self) -> None:
         """Start capturing system audio."""
@@ -214,9 +222,18 @@ class CoreAudioTapRecorder:
         elif msg_type == "started":
             self._actual_sample_rate = msg.get("actualSampleRate")
             self._channels = msg.get("channels", 2)
+            self._microphone_active = msg.get("microphoneActive", False)
         elif msg_type == "stopped":
             self._total_samples = msg.get("totalSamples", 0)
             self._stop_event.set()
+        elif msg_type == "warning":
+            # Non-fatal warning (e.g., microphone unavailable)
+            warning_code = msg.get("code", "UNKNOWN")
+            warning_message = msg.get("message", "Unknown warning")
+            print(f"[Courier] Warning ({warning_code}): {warning_message}")
+            # Don't set stop_event - recording continues
+            if self._on_warning:
+                self._on_warning(warning_message)
         elif msg_type == "error":
             error_code = msg.get("code", "UNKNOWN")
             error_message = msg.get("message", "Unknown error")

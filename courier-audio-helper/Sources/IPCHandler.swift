@@ -42,7 +42,8 @@ class IPCHandler: AudioCaptureDelegate {
             sendResponse([
                 "type": "started",
                 "actualSampleRate": captureManager.actualSampleRate,
-                "channels": captureManager.channelsPerFrame
+                "channels": captureManager.channelsPerFrame,
+                "microphoneActive": captureManager.isMicrophoneActive
             ])
 
         case "stop":
@@ -78,6 +79,10 @@ class IPCHandler: AudioCaptureDelegate {
         }
     }
 
+    func didEncounterWarning(_ message: String, code: String) {
+        sendWarning(message: message, code: code)
+    }
+
     // MARK: - IPC Output
 
     private func sendResponse(_ dict: [String: Any]) {
@@ -92,6 +97,14 @@ class IPCHandler: AudioCaptureDelegate {
     private func sendError(message: String, code: String) {
         sendResponse([
             "type": "error",
+            "message": message,
+            "code": code
+        ])
+    }
+
+    private func sendWarning(message: String, code: String) {
+        sendResponse([
+            "type": "warning",
             "message": message,
             "code": code
         ])
