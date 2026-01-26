@@ -4,24 +4,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Courier is a local-first macOS meeting recorder built with Python + Swift. It captures system audio using native Core Audio Taps, transcribes using local Whisper models, and generates enhanced meeting notes via Ollama LLMs. All processing happens locally - no cloud dependencies. Requires macOS 14.2+.
+Courier is a local-first macOS meeting recorder built with Electron + React + Python + Swift. It captures system audio and microphone using native Core Audio Taps, transcribes using local Whisper models, and generates enhanced meeting notes via Ollama LLMs. All processing happens locally - no cloud dependencies. Requires macOS 14.2+.
 
 ## Running the Application
 
 ```bash
-# Requirements: macOS 14.2+ (Sonoma or later)
+# Requirements: macOS 14.2+ (Sonoma or later), Node.js 18+
 
-# Install Python dependencies
+# Install Python dependencies (for backend)
 pip install -r requirements.txt
 
 # Build Swift audio helper (requires Xcode/Swift toolchain)
 # Note: Pre-built binary is included in app/bin/ - only rebuild if needed
 ./build_helper.sh
 
-# Run the app
-python main.py
+# Install Electron app dependencies
+cd desktop && npm install
 
-# First run: Grant "Screen & System Audio Recording" permission when prompted
+# Run the Electron app (development mode)
+cd desktop && npm run dev
+
+# First run: Grant "Screen & System Audio Recording" and "Microphone" permissions when prompted
 
 # Ollama must be running for note generation
 ollama serve  # In separate terminal
@@ -29,52 +32,119 @@ ollama serve  # In separate terminal
 
 ## Architecture
 
-**Entry point:** `main.py` creates the GUI and starts the event loop.
+Courier uses a hybrid architecture: an Electron app for the UI, with a Python backend for ML/AI tasks.
 
-**Core modules in `app/`:**
-- `gui.py` - CustomTkinter main window, settings modal, permission dialog, notes display (CourierApp class)
-- `recorder.py` - CoreAudioTapRecorder: manages Swift helper subprocess, IPC protocol, audio buffering
-- `transcriber.py` - Faster-Whisper transcription pipeline (Transcriber class)
-- `ollama.py` - LLM integration for note enhancement (OllamaClient, NotesGenerator classes)
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Electron App (desktop/)                   │
+│  React + TypeScript UI with Radix design system             │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │ Renderer Process (React)                                 ││
+│  │  - SettingsModal, RecordingControls, NotesEditor        ││
+│  │  - Design tokens in desktop/src/renderer/design/        ││
+│  └─────────────────────────────────────────────────────────┘│
+│                            │                                 │
+│                     IPC (JSON-RPC)                          │
+│                            │                                 │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │ Main Process                                             ││
+│  │  - PythonBridge spawns Python backend                   ││
+│  │  - SQLite database for settings                         ││
+│  └─────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────┘
+                            │
+                     Subprocess (JSON-RPC)
+                            │
+┌─────────────────────────────────────────────────────────────┐
+│                    Python Backend (app/)                     │
+│                                                              │
+│  ipc_server.py    - JSON-RPC server for Electron            │
+│  ipc_protocol.py  - IPC communication protocol              │
+│  recorder.py      - CoreAudioTapRecorder + mic capture      │
+│  transcriber.py   - Faster-Whisper transcription            │
+│  ollama.py        - LLM integration for notes               │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                     Subprocess (IPC)
+                            │
+┌─────────────────────────────────────────────────────────────┐
+│               Swift Helper (courier-audio-helper/)           │
+│                                                              │
+│  AudioCaptureManager.swift   - Core Audio Taps + mic mixing │
+│  MicrophoneCaptureManager.swift - AVAudioEngine mic capture │
+│  RingBuffer.swift            - Audio synchronization        │
+│  IPCHandler.swift            - IPC protocol handler         │
+│  main.swift                  - Entry point                  │
+└─────────────────────────────────────────────────────────────┘
+```
 
-**Swift helper (`courier-audio-helper/`):**
-- `AudioCaptureManager.swift` - Core Audio Taps API integration
+### Electron App (`desktop/`)
+
+**Entry point:** `desktop/src/main/index.ts`
+
+**Key files:**
+- `src/main/python-bridge.ts` - Spawns Python backend, handles JSON-RPC communication
+- `src/main/ipc-handlers.ts` - IPC handlers for renderer process
+- `src/main/database/` - SQLite database for settings persistence
+- `src/renderer/App.tsx` - Main React application
+- `src/renderer/components/` - UI components (SettingsModal, RecordingControls, etc.)
+- `src/renderer/design/` - Design system tokens (colors, spacing, typography)
+- `src/renderer/hooks/` - React hooks (useRecording, useSettings, useTranscription)
+
+### Python Backend (`app/`)
+
+**Entry point for Electron:** `python -m app.ipc_server`
+
+**Core modules:**
+- `ipc_server.py` - JSON-RPC server that handles Electron requests
+- `ipc_protocol.py` - IPC message parsing and serialization
+- `recorder.py` - CoreAudioTapRecorder: manages Swift helper subprocess, audio buffering
+- `transcriber.py` - Faster-Whisper transcription pipeline
+- `ollama.py` - LLM integration for note enhancement
+
+### Swift Helper (`courier-audio-helper/`)
+
+**Audio capture components:**
+- `AudioCaptureManager.swift` - Core Audio Taps for system audio + mixing
+- `MicrophoneCaptureManager.swift` - AVAudioEngine for microphone capture
+- `RingBuffer.swift` - Lock-free ring buffer for audio synchronization
 - `IPCHandler.swift` - IPC protocol (JSON control + binary audio)
-- `main.swift` - Entry point, CLI argument handling (`--check-permission`)
+- `main.swift` - Entry point, CLI argument handling
 
-**Threading model:** Audio capture runs in a separate Swift process. Python communicates via IPC: JSON commands over stdin/stdout, binary PCM audio over stderr. Two daemon threads in Python handle reading control messages and audio data. Transcription and LLM calls also run in daemon threads. UI updates are marshaled to the main thread via `.after(0, callback)`.
-
-**Data flow:**
-1. CoreAudioTapRecorder spawns Swift helper subprocess
-2. Swift helper creates Core Audio Tap for system-wide audio capture
-3. Audio chunks streamed to Python via stderr (size-prefixed binary PCM float32)
-4. On stop, audio resampled to 16kHz → Transcriber runs Whisper
-5. User can enhance notes → NotesGenerator streams from Ollama
-
-**Privacy design:** Audio kept in memory only, never written to disk. Transcribed then discarded.
+**Audio flow:**
+1. System audio captured via Core Audio Taps (48kHz stereo)
+2. Microphone captured via AVAudioEngine (converted to 48kHz stereo)
+3. Both sources mixed at 50/50 ratio in Swift
+4. Mixed audio streamed to Python via stderr (size-prefixed binary PCM)
+5. Python resamples to 16kHz mono for Whisper transcription
 
 ## Key Patterns
 
-- **Callback pattern for background work:** Functions accept `on_error`, `on_complete`, `on_progress` callbacks
+- **JSON-RPC for Electron ↔ Python:** Typed request/response protocol via stdin/stdout
+- **Binary audio streaming:** Size-prefixed PCM float32 over stderr (Python ↔ Swift)
+- **Callback pattern:** Functions accept `on_error`, `on_complete`, `on_progress` callbacks
 - **Config dataclasses:** AudioConfig, TranscriberConfig, OllamaConfig for typed configuration
 - **Lazy model loading:** Whisper models loaded on first transcription, then cached
-- **Streaming tokens:** Ollama responses parsed line-by-line JSON for real-time display
-- **Session continuity:** Audio and transcripts append across multiple recordings in a session
+- **Graceful degradation:** If microphone unavailable, recording continues with system audio only
 
-**IPC Protocol (Python <-> Swift):**
-- Control: JSON over stdin (Python->Swift) and stdout (Swift->Python)
-- Audio: Binary PCM float32 with 4-byte big-endian size prefix over stderr
-- Commands: `{"command": "start", "sampleRate": 16000}`, `{"command": "stop"}`
-- Responses: `{"type": "ready"}`, `{"type": "started", "actualSampleRate": ...}`, `{"type": "stopped", "totalSamples": ...}`, `{"type": "error", "code": "...", "message": "..."}`
+## Design System
+
+The Electron app uses a comprehensive design system based on Radix colors:
+
+- **Colors:** Jade (primary), Pink (accent), Slate (neutral), Red (error) - see `desktop/src/renderer/design/tokens/colors.ts`
+- **Spacing:** 4px base unit scale - see `desktop/src/renderer/design/tokens/spacing.ts`
+- **Typography:** Geist font family - see `desktop/src/renderer/design/tokens/typography.ts`
+- **Documentation:** See `STYLING.md` for full design system documentation
 
 ## Technical Details
 
 - **System requirements:** macOS 14.2+ (Sonoma or later)
-- **Audio capture:** Core Audio Taps (native macOS API, system-wide)
-- **Permission:** Screen & System Audio Recording (granted via System Settings)
+- **Audio capture:** Core Audio Taps (system-wide) + AVAudioEngine (microphone)
+- **Permissions:** Screen & System Audio Recording + Microphone
 - **Whisper models:** tiny, base, small, medium (default), large-v3
-- **Compute detection:** CUDA -> MPS -> CPU with int8 quantization
+- **Compute detection:** CUDA → MPS → CPU with int8 quantization
 - **Default language:** Dutch (nl), supports EN, DE, FR, ES, IT, PT
 - **Ollama endpoint:** http://localhost:11434
-- **Audio format:** 16kHz mono float32 required for Whisper (resampling handled automatically)
-- **Build:** `build_helper.sh` creates universal binary (ARM64 + x86_64) in `app/bin/`
+- **Audio format:** 16kHz mono float32 required for Whisper
+- **Build:** `build_helper.sh` creates universal binary (ARM64 + x86_64)
