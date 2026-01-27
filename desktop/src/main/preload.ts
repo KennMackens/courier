@@ -56,6 +56,9 @@ export interface PythonAPI {
   getSettings: () => Promise<Settings>
   setSettings: (settings: Partial<Settings>) => Promise<{ ok: boolean }>
 
+  // Ollama
+  getOllamaModels: () => Promise<{ models: string[] }>
+
   // Session
   resetSession: () => Promise<{ ok: boolean }>
 
@@ -85,6 +88,9 @@ const pythonAPI: PythonAPI = {
   // Settings
   getSettings: () => ipcRenderer.invoke('python:getSettings'),
   setSettings: (settings) => ipcRenderer.invoke('python:setSettings', settings),
+
+  // Ollama
+  getOllamaModels: () => ipcRenderer.invoke('python:getOllamaModels'),
 
   // Session
   resetSession: () => ipcRenderer.invoke('python:resetSession'),

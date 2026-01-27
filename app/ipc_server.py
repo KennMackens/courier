@@ -74,6 +74,7 @@ class IPCServer:
             "transcribe": self._handle_transcribe,
             "enhanceNotes": self._handle_enhance_notes,
             "resetSession": self._handle_reset_session,
+            "getOllamaModels": self._handle_get_ollama_models,
         }
 
     def run(self):
@@ -410,6 +411,13 @@ class IPCServer:
         self.transcript = ""
 
         self.writer.send_result(request.id, {"ok": True})
+
+    def _handle_get_ollama_models(self, request: Request):
+        """Get available Ollama models."""
+        ollama_config = OllamaConfig(base_url=self.settings.ollama_endpoint)
+        client = OllamaClient(ollama_config)
+        models = client.list_models()
+        self.writer.send_result(request.id, {"models": models})
 
 
 def main():

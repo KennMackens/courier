@@ -1,4 +1,5 @@
 import * as React from "react"
+import { RefreshCw } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -51,10 +52,40 @@ export function SettingsModal({
   // Local form state (for cancel behavior)
   const [formState, setFormState] = React.useState<Settings>(settings)
 
-  // Sync form state when settings change
+  // Ollama models state
+  const [ollamaModels, setOllamaModels] = React.useState<string[]>([])
+  const [isLoadingModels, setIsLoadingModels] = React.useState(false)
+
+  // Fetch available Ollama models
+  const fetchOllamaModels = React.useCallback(async () => {
+    setIsLoadingModels(true)
+    try {
+      const result = await window.python.getOllamaModels()
+      setOllamaModels(result.models || [])
+    } catch (err) {
+      console.error("Failed to fetch Ollama models:", err)
+      setOllamaModels([])
+    } finally {
+      setIsLoadingModels(false)
+    }
+  }, [])
+
+  // Fetch models when modal opens
   React.useEffect(() => {
-    setFormState(settings)
-  }, [settings])
+    if (open) {
+      fetchOllamaModels()
+    }
+  }, [open, fetchOllamaModels])
+
+  // Only sync form state when modal opens, not on settings changes (to avoid resetting user edits)
+  const prevOpenRef = React.useRef(false)
+  React.useEffect(() => {
+    // Only sync when modal transitions from closed to open
+    if (open && !prevOpenRef.current) {
+      setFormState(settings)
+    }
+    prevOpenRef.current = open
+  }, [open, settings])
 
   // Handle form field changes
   const updateField = <K extends keyof Settings>(key: K, value: Settings[K]) => {
@@ -112,7 +143,7 @@ export function SettingsModal({
             <Spinner size="lg" />
           </div>
         ) : (
-          <div className="space-y-6 py-4">
+          <div className="space-y-6 py-4 px-6">
             {/* Error display */}
             {error && (
               <Alert variant="destructive">
@@ -201,15 +232,40 @@ export function SettingsModal({
               {/* Ollama Model */}
               <div className="space-y-2">
                 <Label htmlFor="ollamaModel">Ollama Model</Label>
-                <Input
-                  id="ollamaModel"
-                  value={formState.ollamaModel}
-                  onChange={(e) => updateField("ollamaModel", e.target.value)}
-                  placeholder="llama3"
-                />
-                <p className="text-xs text-slate-9">
-                  The model must be available in your Ollama installation
-                </p>
+                <div className="flex gap-2">
+                  <Select
+                    value={formState.ollamaModel}
+                    onValueChange={(value) => updateField("ollamaModel", value)}
+                    disabled={isLoadingModels}
+                  >
+                    <SelectTrigger id="ollamaModel" className="flex-1">
+                      <SelectValue placeholder={isLoadingModels ? "Loading..." : "Select model"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ollamaModels.length > 0 ? (
+                        ollamaModels.map((model) => (
+                          <SelectItem key={model} value={model}>
+                            {model}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <SelectItem value="" disabled>
+                          {isLoadingModels ? "Loading..." : "No models available"}
+                        </SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={fetchOllamaModels}
+                    disabled={isLoadingModels}
+                    title="Refresh models"
+                  >
+                    <RefreshCw className={cn("h-4 w-4", isLoadingModels && "animate-spin")} />
+                  </Button>
+                </div>
               </div>
             </div>
 
