@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react"
 import { StatusBar } from "@/components/StatusBar"
 import { RecordingControls } from "@/components/RecordingControls"
-import { TranscriptView } from "@/components/TranscriptView"
 import { NotesEditor } from "@/components/NotesEditor"
 import { SettingsModal } from "@/components/SettingsModal"
 import { EndMeetingModal, BackgroundNotification } from "@/components/EndMeetingModal"
@@ -326,8 +325,8 @@ function App() {
       />
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto p-6">
-        <div className="max-w-4xl mx-auto space-y-6">
+      <main className="flex-1 overflow-hidden p-6 flex flex-col min-h-0">
+        <div className="max-w-4xl mx-auto w-full flex flex-col gap-6 flex-1 min-h-0">
           {/* Header */}
           <div className="border-b border-slate-6 pb-4">
             <h1 className="text-2xl font-bold text-slate-12">Courier</h1>
@@ -369,13 +368,6 @@ function App() {
               disabled={isDisabled}
             />
           </section>
-
-          {/* Transcript View */}
-          <TranscriptView
-            transcript={transcription.totalTranscript}
-            isTranscribing={transcription.isTranscribing}
-            progress={transcription.progress}
-          />
 
           {/* Notes Editor */}
           <NotesEditor

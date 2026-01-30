@@ -16,8 +16,8 @@ export function NotesEditor({
   className,
 }: NotesEditorProps) {
   return (
-    <div className={cn("flex flex-col gap-2", className)}>
-      <Label htmlFor="notes" className="text-slate-12 font-medium">
+    <div className={cn("flex flex-col gap-2 flex-1 min-h-0", className)}>
+      <Label htmlFor="notes" className="text-slate-12 font-medium shrink-0">
         Notes
       </Label>
       <Textarea
@@ -26,8 +26,7 @@ export function NotesEditor({
         onChange={(e) => onNotesChange(e.target.value)}
         placeholder="Take notes during the meeting... These will be enhanced with the transcript context when you end the meeting."
         disabled={disabled}
-        rows={6}
-        className="resize-y min-h-[120px]"
+        className="resize-none flex-1 min-h-0"
       />
     </div>
   )
