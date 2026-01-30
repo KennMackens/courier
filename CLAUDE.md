@@ -79,6 +79,126 @@ Courier uses a hybrid architecture: an Electron app for the UI, with a Python ba
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## Architecture Diagrams (Mermaid)
+
+The diagrams below use Mermaid syntax for maintainability. While they won't render in plain text, the syntax is readable and understood by Claude.
+
+### IPC Communication Flow
+
+Shows how the three main components communicate:
+
+```mermaid
+graph TB
+    subgraph Electron["Electron App"]
+        Renderer["Renderer Process<br/>(React UI)"]
+        Main["Main Process<br/>(Node.js)"]
+    end
+
+    subgraph Python["Python Backend"]
+        IPC["ipc_server.py<br/>(JSON-RPC Server)"]
+        Recorder["recorder.py"]
+        Transcriber["transcriber.py"]
+        Ollama["ollama.py"]
+    end
+
+    subgraph Swift["Swift Helper"]
+        AudioCapture["AudioCaptureManager"]
+        MicCapture["MicrophoneCaptureManager"]
+        IPCHandler["IPCHandler"]
+    end
+
+    Renderer <-->|"Electron IPC"| Main
+    Main <-->|"JSON-RPC<br/>(stdin/stdout)"| IPC
+    IPC --> Recorder
+    IPC --> Transcriber
+    IPC --> Ollama
+    Recorder <-->|"JSON control<br/>(stdin/stdout)"| IPCHandler
+    IPCHandler -.->|"Binary PCM audio<br/>(stderr)"| Recorder
+    IPCHandler --> AudioCapture
+    IPCHandler --> MicCapture
+```
+
+### Audio Pipeline
+
+Shows how audio flows from capture to transcription:
+
+```mermaid
+graph LR
+    subgraph Capture["Audio Capture (Swift)"]
+        System["System Audio<br/>Core Audio Taps<br/>48kHz stereo"]
+        Mic["Microphone<br/>AVAudioEngine<br/>48kHz stereo"]
+    end
+
+    subgraph Mix["Mixing (Swift)"]
+        Mixer["Audio Mixer<br/>50/50 ratio"]
+    end
+
+    subgraph Process["Processing (Python)"]
+        Buffer["Audio Buffer"]
+        Resample["Resample<br/>48kHz → 16kHz<br/>stereo → mono"]
+        Whisper["Faster-Whisper<br/>Transcription"]
+    end
+
+    subgraph Output["Output"]
+        Transcript["Transcript Text"]
+        Enhanced["Enhanced Notes<br/>(via Ollama)"]
+    end
+
+    System --> Mixer
+    Mic --> Mixer
+    Mixer -->|"Binary PCM<br/>float32"| Buffer
+    Buffer --> Resample
+    Resample --> Whisper
+    Whisper --> Transcript
+    Transcript --> Enhanced
+```
+
+### Recording Session Sequence
+
+Shows the runtime flow of a typical recording session:
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Renderer as Renderer (React)
+    participant Main as Main Process
+    participant Python as Python Backend
+    participant Swift as Swift Helper
+    participant Ollama as Ollama LLM
+
+    User->>Renderer: Click "Start Recording"
+    Renderer->>Main: startRecording()
+    Main->>Python: JSON-RPC: start_recording
+    Python->>Swift: Spawn helper process
+    Swift->>Swift: Initialize Core Audio Taps
+    Swift->>Swift: Initialize Microphone
+    Swift-->>Python: Audio stream (binary PCM via stderr)
+
+    loop During Recording
+        Swift-->>Python: Continuous audio chunks
+        Python->>Python: Buffer audio data
+    end
+
+    User->>Renderer: Click "Stop Recording"
+    Renderer->>Main: stopRecording()
+    Main->>Python: JSON-RPC: stop_recording
+    Python->>Swift: Send stop command
+    Swift->>Swift: Cleanup audio sessions
+    Python->>Python: Save audio to file
+
+    Python->>Python: Transcribe with Whisper
+    Python-->>Main: Streaming transcript chunks
+    Main-->>Renderer: Update transcript display
+
+    User->>Renderer: Click "End Meeting"
+    Renderer->>Main: enhanceNotes()
+    Main->>Python: JSON-RPC: enhance_notes
+    Python->>Ollama: Stream prompt + notes + transcript
+    Ollama-->>Python: Streaming tokens
+    Python-->>Main: Streaming enhanced notes
+    Main-->>Renderer: Update enhanced notes display
+```
+
 ### Electron App (`desktop/`)
 
 **Entry point:** `desktop/src/main/index.ts`
