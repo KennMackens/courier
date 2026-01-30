@@ -39,7 +39,12 @@ export function initializeDatabaseHandlers(): void {
 
   ipcMain.handle('db:listMeetings', async (_, options?: MeetingListOptions) => {
     if (!queries) throw new Error('Database not initialized')
-    return queries.listMeetings(options)
+    try {
+      return queries.listMeetings(options)
+    } catch (error) {
+      console.error('[Database IPC] listMeetings error:', error)
+      throw error
+    }
   })
 
   ipcMain.handle('db:updateMeeting', async (_, id: string, input: UpdateMeetingInput) => {

@@ -5,13 +5,26 @@ import { TranscriptView } from "@/components/TranscriptView"
 import { NotesEditor } from "@/components/NotesEditor"
 import { SettingsModal } from "@/components/SettingsModal"
 import { EndMeetingModal, BackgroundNotification } from "@/components/EndMeetingModal"
+import { SessionHistorySidebar } from "@/components/SessionHistory"
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert"
 import { Toast, ToastTitle, ToastDescription, ToastContainer } from "@/components/ui/toast"
 import { useRecording } from "@/hooks/useRecording"
 import { useTranscription } from "@/hooks/useTranscription"
 import { useNotesEnhancement } from "@/hooks/useNotesEnhancement"
 import { useSettings } from "@/hooks/useSettings"
+import { useSessionHistory } from "@/hooks/useSessionHistory"
 import { applyTheme, getStoredTheme } from "@/lib/theme"
+
+const SIDEBAR_STORAGE_KEY = 'courier-sidebar-open'
+
+function getSidebarStoredState(): boolean {
+  if (typeof window === 'undefined') return false
+  return localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true'
+}
+
+function setSidebarStoredState(open: boolean): void {
+  localStorage.setItem(SIDEBAR_STORAGE_KEY, open.toString())
+}
 
 interface ConnectionStatus {
   connected: boolean
@@ -42,6 +55,7 @@ function App() {
   const [toasts, setToasts] = useState<ToastState[]>([])
   const [endMeetingModalOpen, setEndMeetingModalOpen] = useState(false)
   const [isBackgrounded, setIsBackgrounded] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(() => getSidebarStoredState())
 
   // Custom hooks
   const recording = useRecording({
@@ -71,6 +85,11 @@ function App() {
     onSaved: () => showToast("Settings Saved", "Your settings have been saved.", "success"),
   })
 
+  const sessionHistory = useSessionHistory({
+    onError: (error) => showToast("History Error", error, "destructive"),
+    onMeetingDeleted: () => showToast("Meeting Deleted", "The meeting has been removed.", "default"),
+  })
+
   // Toast helper
   const showToast = useCallback(
     (title: string, description: string, variant: ToastState["variant"] = "default") => {
@@ -88,6 +107,11 @@ function App() {
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id))
   }, [])
+
+  // Persist sidebar state
+  useEffect(() => {
+    setSidebarStoredState(sidebarOpen)
+  }, [sidebarOpen])
 
   // Initialize connection to Python
   useEffect(() => {
@@ -182,11 +206,58 @@ function App() {
     setEndMeetingModalOpen(true)
   }, [])
 
+  // Extract title from enhanced notes (first line or fallback)
+  const extractTitle = useCallback((enhancedNotes: string) => {
+    if (!enhancedNotes.trim()) return null
+    // Try to get the first line as title
+    const firstLine = enhancedNotes.split("\n")[0].trim()
+    // Remove markdown headers if present
+    const cleanTitle = firstLine.replace(/^#+\s*/, "").trim()
+    // Limit length
+    return cleanTitle.slice(0, 100) || null
+  }, [])
+
   // Handle saving and closing the meeting
   const handleSave = useCallback(async () => {
     try {
-      // TODO: Save to database via IPC when db handlers are ready
+      // Extract title from enhanced notes
+      const title = extractTitle(enhancement.enhancedNotes) || `Meeting - ${new Date().toLocaleDateString()}`
+
+      // Create meeting in database
+      const meeting = await window.database.createMeeting({
+        title,
+        date_time: new Date().toISOString(),
+        duration: recording.duration,
+      })
+
+      // Save raw notes as 'original' summary
+      if (notes.trim()) {
+        await window.database.addSummary(meeting.id, "original", notes)
+      }
+
+      // Save enhanced notes as 'enhanced' summary
+      if (enhancement.enhancedNotes.trim()) {
+        await window.database.addSummary(meeting.id, "enhanced", enhancement.enhancedNotes)
+      }
+
+      // Save transcript to file
+      if (transcription.totalTranscript.trim()) {
+        await window.database.saveTranscript(meeting.id, transcription.totalTranscript)
+
+        // Index for search
+        await window.database.indexMeeting(
+          meeting.id,
+          title,
+          transcription.totalTranscript,
+          enhancement.enhancedNotes
+        )
+      }
+
+      // Reset Python session
       await window.python.resetSession()
+
+      // Add meeting to history and open sidebar
+      sessionHistory.addMeeting(meeting)
 
       // Reset all state
       recording.reset()
@@ -196,6 +267,10 @@ function App() {
       setEndMeetingModalOpen(false)
       setIsBackgrounded(false)
 
+      // Open sidebar to show saved meeting
+      setSidebarOpen(true)
+      sessionHistory.selectMeeting(meeting.id)
+
       showToast("Meeting Saved", "Your meeting notes have been saved.", "success")
     } catch (error) {
       showToast(
@@ -204,7 +279,7 @@ function App() {
         "destructive"
       )
     }
-  }, [recording, transcription, enhancement, showToast])
+  }, [recording, transcription, enhancement, notes, extractTitle, sessionHistory, showToast])
 
   // Handle discarding the meeting
   const handleDiscard = useCallback(async () => {
@@ -247,6 +322,7 @@ function App() {
         permissionGranted={permissionGranted}
         error={currentError}
         onSettingsClick={() => setSettingsOpen(true)}
+        onHistoryClick={() => setSidebarOpen(true)}
       />
 
       {/* Main Content */}
@@ -359,6 +435,23 @@ function App() {
         isComplete={enhancement.isComplete}
         hasError={enhancement.hasError}
         onClick={handleRestoreModal}
+      />
+
+      {/* Session History Sidebar */}
+      <SessionHistorySidebar
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        meetings={sessionHistory.meetings}
+        selectedMeetingId={sessionHistory.selectedMeetingId}
+        selectedMeeting={sessionHistory.selectedMeeting}
+        transcript={sessionHistory.transcript}
+        isLoading={sessionHistory.isLoading}
+        isLoadingDetails={sessionHistory.isLoadingDetails}
+        searchQuery={sessionHistory.searchQuery}
+        onSearchChange={sessionHistory.setSearchQuery}
+        onSelectMeeting={sessionHistory.selectMeeting}
+        onDeleteMeeting={sessionHistory.deleteMeeting}
+        isEmpty={sessionHistory.isEmpty}
       />
     </div>
   )

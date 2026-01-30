@@ -1,4 +1,4 @@
-import { Settings, Wifi, WifiOff, AlertCircle } from "lucide-react"
+import { Settings, Wifi, WifiOff, AlertCircle, History } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -8,6 +8,7 @@ interface StatusBarProps {
   permissionGranted: boolean
   error?: string | null
   onSettingsClick: () => void
+  onHistoryClick: () => void
   className?: string
 }
 
@@ -17,6 +18,7 @@ export function StatusBar({
   permissionGranted,
   error,
   onSettingsClick,
+  onHistoryClick,
   className,
 }: StatusBarProps) {
   return (
@@ -64,16 +66,27 @@ export function StatusBar({
         )}
       </div>
 
-      {/* Right side: Settings button */}
-      <Button
-        onClick={onSettingsClick}
-        variant="ghost"
-        size="sm"
-        className="h-8 w-8 p-0"
-      >
-        <Settings className="h-4 w-4" />
-        <span className="sr-only">Settings</span>
-      </Button>
+      {/* Right side: History and Settings buttons */}
+      <div className="flex items-center gap-1">
+        <Button
+          onClick={onHistoryClick}
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0"
+        >
+          <History className="h-4 w-4" />
+          <span className="sr-only">Session History</span>
+        </Button>
+        <Button
+          onClick={onSettingsClick}
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0"
+        >
+          <Settings className="h-4 w-4" />
+          <span className="sr-only">Settings</span>
+        </Button>
+      </div>
     </div>
   )
 }

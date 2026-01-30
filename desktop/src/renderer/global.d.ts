@@ -9,6 +9,52 @@ export interface Settings {
   availableModels: string[]
 }
 
+// Database types
+export interface Meeting {
+  id: string
+  title: string | null
+  date_time: string
+  duration: number
+  transcript_path: string | null
+  audio_path: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Speaker {
+  id: string
+  meeting_id: string
+  name: string
+  word_count: number
+}
+
+export interface Summary {
+  id: string
+  meeting_id: string
+  type: 'original' | 'enhanced'
+  content: string
+  created_at: string
+}
+
+export interface MeetingWithDetails extends Meeting {
+  speakers: Speaker[]
+  summaries: Summary[]
+}
+
+export interface CreateMeetingInput {
+  title?: string
+  date_time?: string
+  duration?: number
+  transcript_path?: string
+  audio_path?: string
+}
+
+export interface MeetingListOptions {
+  limit?: number
+  offset?: number
+  search?: string
+}
+
 // Python API interface
 export interface PythonAPI {
   // Initialization
@@ -49,6 +95,9 @@ export interface PythonAPI {
   getSettings: () => Promise<Settings>
   setSettings: (settings: Partial<Settings>) => Promise<{ ok: boolean }>
 
+  // Ollama
+  getOllamaModels: () => Promise<{ models: string[] }>
+
   // Session
   resetSession: () => Promise<{ ok: boolean }>
 
@@ -59,10 +108,43 @@ export interface PythonAPI {
   onError: (callback: (error: { message: string }) => void) => () => void
 }
 
+// Database API interface
+export interface DatabaseAPI {
+  // Meetings
+  createMeeting: (input: CreateMeetingInput) => Promise<Meeting>
+  getMeeting: (id: string) => Promise<Meeting | null>
+  getMeetingWithDetails: (id: string) => Promise<MeetingWithDetails | null>
+  listMeetings: (options?: MeetingListOptions) => Promise<Meeting[]>
+  updateMeeting: (id: string, input: Partial<CreateMeetingInput>) => Promise<Meeting | null>
+  deleteMeeting: (id: string) => Promise<boolean>
+
+  // Speakers
+  addSpeaker: (meetingId: string, name: string, wordCount?: number) => Promise<Speaker>
+  getSpeakers: (meetingId: string) => Promise<Speaker[]>
+
+  // Summaries
+  addSummary: (meetingId: string, type: 'original' | 'enhanced', content: string) => Promise<Summary>
+  getSummaries: (meetingId: string) => Promise<Summary[]>
+  getSummaryByType: (meetingId: string, type: 'original' | 'enhanced') => Promise<Summary | null>
+
+  // Search
+  searchMeetings: (query: string, limit?: number) => Promise<Meeting[]>
+  indexMeeting: (meetingId: string, title: string, transcriptContent: string, summaryContent: string) => Promise<{ ok: boolean }>
+
+  // Storage
+  saveTranscript: (meetingId: string, content: string) => Promise<{ path: string }>
+  readTranscript: (meetingId: string) => Promise<{ content: string | null }>
+
+  // Statistics
+  getMeetingCount: () => Promise<{ count: number }>
+  getTotalDuration: () => Promise<{ duration: number }>
+}
+
 // Extend Window interface
 declare global {
   interface Window {
     python: PythonAPI
+    database: DatabaseAPI
   }
 }
 
