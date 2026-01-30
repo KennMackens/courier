@@ -4,6 +4,7 @@ import { RecordingControls } from "@/components/RecordingControls"
 import { TranscriptView } from "@/components/TranscriptView"
 import { NotesEditor } from "@/components/NotesEditor"
 import { SettingsModal } from "@/components/SettingsModal"
+import { EndMeetingModal, BackgroundNotification } from "@/components/EndMeetingModal"
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert"
 import { Toast, ToastTitle, ToastDescription, ToastContainer } from "@/components/ui/toast"
 import { useRecording } from "@/hooks/useRecording"
@@ -39,6 +40,8 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [notes, setNotes] = useState("")
   const [toasts, setToasts] = useState<ToastState[]>([])
+  const [endMeetingModalOpen, setEndMeetingModalOpen] = useState(false)
+  const [isBackgrounded, setIsBackgrounded] = useState(false)
 
   // Custom hooks
   const recording = useRecording({
@@ -60,10 +63,7 @@ function App() {
   })
 
   const enhancement = useNotesEnhancement({
-    onComplete: () => {
-      showToast("Enhancement Complete", "Notes have been enhanced.", "success")
-    },
-    onError: (error) => showToast("Enhancement Error", error, "destructive"),
+    // Toasts are now handled in the modal context
   })
 
   const settings = useSettings({
@@ -151,11 +151,41 @@ function App() {
     })
   }, [notes, transcription.totalTranscript, settings.settings.language, enhancement])
 
-  // Handle end meeting
-  const handleEndMeeting = useCallback(async () => {
+  // Handle end meeting - opens modal and triggers enhancement
+  const handleEndMeeting = useCallback(() => {
+    setEndMeetingModalOpen(true)
+    setIsBackgrounded(false)
+
+    // Auto-trigger enhancement if there's content
+    const hasNotes = notes.trim().length > 0
+    const hasTranscript = transcription.totalTranscript.trim().length > 0
+
+    if (hasNotes || hasTranscript) {
+      enhancement.clearEnhancedNotes()
+      enhancement.enhanceNotes({
+        notes,
+        transcript: transcription.totalTranscript,
+        language: settings.settings.language,
+      })
+    }
+  }, [notes, transcription.totalTranscript, settings.settings.language, enhancement])
+
+  // Handle backgrounding the modal
+  const handleBackground = useCallback(() => {
+    setIsBackgrounded(true)
+    setEndMeetingModalOpen(false)
+  }, [])
+
+  // Handle restoring the modal from background
+  const handleRestoreModal = useCallback(() => {
+    setIsBackgrounded(false)
+    setEndMeetingModalOpen(true)
+  }, [])
+
+  // Handle saving and closing the meeting
+  const handleSave = useCallback(async () => {
     try {
       // TODO: Save to database via IPC when db handlers are ready
-      // For now, just reset the session
       await window.python.resetSession()
 
       // Reset all state
@@ -163,12 +193,37 @@ function App() {
       transcription.clearTranscript()
       enhancement.clearEnhancedNotes()
       setNotes("")
+      setEndMeetingModalOpen(false)
+      setIsBackgrounded(false)
 
-      showToast("Meeting Ended", "Session has been saved and reset.", "success")
+      showToast("Meeting Saved", "Your meeting notes have been saved.", "success")
     } catch (error) {
       showToast(
         "Error",
-        error instanceof Error ? error.message : "Failed to end meeting",
+        error instanceof Error ? error.message : "Failed to save meeting",
+        "destructive"
+      )
+    }
+  }, [recording, transcription, enhancement, showToast])
+
+  // Handle discarding the meeting
+  const handleDiscard = useCallback(async () => {
+    try {
+      await window.python.resetSession()
+
+      // Reset all state
+      recording.reset()
+      transcription.clearTranscript()
+      enhancement.clearEnhancedNotes()
+      setNotes("")
+      setEndMeetingModalOpen(false)
+      setIsBackgrounded(false)
+
+      showToast("Meeting Discarded", "Session has been discarded.", "default")
+    } catch (error) {
+      showToast(
+        "Error",
+        error instanceof Error ? error.message : "Failed to discard meeting",
         "destructive"
       )
     }
@@ -250,9 +305,6 @@ function App() {
           <NotesEditor
             notes={notes}
             onNotesChange={setNotes}
-            enhancedNotes={enhancement.enhancedNotes}
-            isEnhancing={enhancement.isEnhancing}
-            onEnhanceNotes={handleEnhanceNotes}
             disabled={isDisabled}
           />
         </div>
@@ -284,6 +336,30 @@ function App() {
           </Toast>
         ))}
       </ToastContainer>
+
+      {/* End Meeting Modal */}
+      <EndMeetingModal
+        open={endMeetingModalOpen}
+        onOpenChange={setEndMeetingModalOpen}
+        rawNotes={notes}
+        transcript={transcription.totalTranscript}
+        enhancedNotes={enhancement.enhancedNotes}
+        isEnhancing={enhancement.isEnhancing}
+        enhancementError={enhancement.error}
+        onEnhance={handleEnhanceNotes}
+        onBackground={handleBackground}
+        onSave={handleSave}
+        onDiscard={handleDiscard}
+      />
+
+      {/* Background Notification */}
+      <BackgroundNotification
+        visible={isBackgrounded}
+        isEnhancing={enhancement.isEnhancing}
+        isComplete={enhancement.isComplete}
+        hasError={enhancement.hasError}
+        onClick={handleRestoreModal}
+      />
     </div>
   )
 }

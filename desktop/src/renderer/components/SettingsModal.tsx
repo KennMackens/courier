@@ -143,7 +143,7 @@ export function SettingsModal({
             <Spinner size="lg" />
           </div>
         ) : (
-          <div className="space-y-6 py-4 px-6">
+          <div className="space-y-6 py-4 px-6 max-h-[60vh] overflow-y-auto">
             {/* Error display */}
             {error && (
               <Alert variant="destructive">
@@ -298,13 +298,14 @@ export function SettingsModal({
           </div>
         )}
 
-        <DialogFooter>
-          <Button variant="outline" onClick={handleCancel} disabled={isSaving}>
+        <DialogFooter className="relative z-20">
+          <Button variant="outline" onClick={handleCancel} disabled={isSaving} className="z-20">
             Cancel
           </Button>
           <Button
             onClick={handleSave}
             disabled={isSaving || !isValidEndpoint || isLoading}
+            className="z-20"
           >
             {isSaving ? (
               <>

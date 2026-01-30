@@ -101,7 +101,7 @@ const DialogOverlay = React.forwardRef<
 DialogOverlay.displayName = "DialogOverlay"
 
 interface DialogContentProps extends React.HTMLAttributes<HTMLDivElement> {
-  onEscapeKeyDown?: () => void
+  onEscapeKeyDown?: () => void | boolean // Return true to prevent close
 }
 
 const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
@@ -111,8 +111,10 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
     React.useEffect(() => {
       const handleKeyDown = (e: KeyboardEvent) => {
         if (e.key === "Escape") {
-          onEscapeKeyDown?.()
-          onOpenChange(false)
+          const shouldPreventClose = onEscapeKeyDown?.()
+          if (!shouldPreventClose) {
+            onOpenChange(false)
+          }
         }
       }
 
@@ -138,6 +140,7 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
             "bg-background border border-slate-6 rounded-lg shadow-lg",
             "animate-in fade-in-0 zoom-in-95 duration-200",
             "focus:outline-none",
+            "flex flex-col",
             className
           )}
           onClick={(e) => e.stopPropagation()}
@@ -173,7 +176,7 @@ const DialogFooter = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      "flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 p-6 pt-4",
+      "relative z-10 flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 p-6 pt-4",
       className
     )}
     {...props}

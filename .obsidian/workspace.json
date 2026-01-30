@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "CLAUDE.md",
+                "file": "STYLING.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "CLAUDE"
+              "title": "STYLING"
             }
           }
         ]
@@ -183,28 +183,38 @@
       "bases:Create new base": false
     }
   },
-  "active": "0baec26608bb20c4",
+  "active": "27b2ecd05ecafbd2",
   "lastOpenFiles": [
+    "desktop/dist/renderer/assets/index-DNViVGRr.js",
+    "desktop/dist/renderer/assets/index-Bbex5tnA.css",
+    "desktop/src/renderer/components/EndMeetingModal/index.ts",
+    "desktop/src/renderer/components/EndMeetingModal/EndMeetingModal.tsx",
+    "desktop/src/renderer/components/EndMeetingModal/BackgroundNotification.tsx",
+    "desktop/src/renderer/components/EndMeetingModal/StreamingText.tsx",
+    "desktop/src/renderer/components/EndMeetingModal",
+    "Various/spec.md",
+    "Various/Reminders.md",
+    "Various",
+    "desktop/dist/renderer/assets/index-BxqZVX24.css",
+    "desktop/dist/renderer/assets/index-Dc3TP9tV.js",
+    "desktop/node_modules/better-sqlite3/build/Release/test_extension.node",
+    "CLAUDE.md",
+    "STYLING.md",
+    "desktop/node_modules/@fontsource-variable/geist/README.md",
+    "desktop/node_modules/@fontsource-variable/geist/CHANGELOG.md",
+    "desktop/node_modules/@fontsource-variable/geist-mono/README.md",
+    "desktop/node_modules/@fontsource-variable/geist-mono/CHANGELOG.md",
+    "desktop/node_modules/@radix-ui/colors/colors.png",
+    "desktop/node_modules/@radix-ui/colors/README.md",
+    "code-review/SKILL.md",
+    "SKILL.md",
     "Untitled.md",
     "linear-ticket/SKILL.md",
     "linear-ticket/linear-ticket.md",
-    "linear-ticket",
-    "naamloze map",
-    "linear-idea",
     "skills/linear-ticket.md",
     "linear-ticket.md",
     "linear-idea/linear-idea.md",
-    "linear-idea",
     "skills/linear-idea.md",
-    "CLAUDE.md",
-    "skills",
-    "Various/Reminders.md",
-    "linear-idea.md.md",
-    "Various",
-    "app/__pycache__/ollama.cpython-310.pyc",
-    "app/__pycache__/transcriber.cpython-310.pyc",
-    "app/__pycache__/recorder.cpython-310.pyc",
-    "app/__pycache__/gui.cpython-310.pyc",
-    "Various/spec.md"
+    "linear-idea.md.md"
   ]
 }
