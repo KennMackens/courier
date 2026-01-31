@@ -185,6 +185,7 @@ export interface DatabaseAPI {
   addSummary: (meetingId: string, type: 'original' | 'enhanced', content: string) => Promise<Summary>
   getSummaries: (meetingId: string) => Promise<Summary[]>
   getSummaryByType: (meetingId: string, type: 'original' | 'enhanced') => Promise<Summary | null>
+  updateSummary: (meetingId: string, type: 'original' | 'enhanced', content: string) => Promise<Summary>
 
   // Search
   searchMeetings: (query: string, limit?: number) => Promise<Meeting[]>
@@ -216,6 +217,7 @@ const databaseAPI: DatabaseAPI = {
   addSummary: (meetingId, type, content) => ipcRenderer.invoke('db:addSummary', meetingId, type, content),
   getSummaries: (meetingId) => ipcRenderer.invoke('db:getSummaries', meetingId),
   getSummaryByType: (meetingId, type) => ipcRenderer.invoke('db:getSummaryByType', meetingId, type),
+  updateSummary: (meetingId, type, content) => ipcRenderer.invoke('db:updateSummary', meetingId, type, content),
 
   // Search
   searchMeetings: (query, limit) => ipcRenderer.invoke('db:searchMeetings', query, limit),

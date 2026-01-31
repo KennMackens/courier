@@ -91,6 +91,11 @@ export function initializeDatabaseHandlers(): void {
     return queries.getSummaryByType(meetingId, type)
   })
 
+  ipcMain.handle('db:updateSummary', async (_, meetingId: string, type: 'original' | 'enhanced', content: string) => {
+    if (!queries) throw new Error('Database not initialized')
+    return queries.upsertSummary(meetingId, type, content)
+  })
+
   // --- Search handlers ---
 
   ipcMain.handle('db:searchMeetings', async (_, query: string, limit?: number) => {
@@ -182,6 +187,7 @@ export function closeDatabaseHandlers(): void {
     'db:addSummary',
     'db:getSummaries',
     'db:getSummaryByType',
+    'db:updateSummary',
     'db:searchMeetings',
     'db:indexMeeting',
     'storage:saveTranscript',

@@ -126,6 +126,7 @@ export interface DatabaseAPI {
   addSummary: (meetingId: string, type: 'original' | 'enhanced', content: string) => Promise<Summary>
   getSummaries: (meetingId: string) => Promise<Summary[]>
   getSummaryByType: (meetingId: string, type: 'original' | 'enhanced') => Promise<Summary | null>
+  updateSummary: (meetingId: string, type: 'original' | 'enhanced', content: string) => Promise<Summary>
 
   // Search
   searchMeetings: (query: string, limit?: number) => Promise<Meeting[]>

@@ -233,6 +233,20 @@ export class MeetingQueries {
     return getStmt.get(id) as Summary | null
   }
 
+  upsertSummary(meetingId: string, type: 'original' | 'enhanced', content: string): Summary {
+    // Check if summary exists
+    const existing = this.getSummaryByType(meetingId, type)
+
+    if (existing) {
+      // Update existing
+      this.updateSummary(existing.id, content)
+      return this.db.prepare('SELECT * FROM summaries WHERE id = ?').get(existing.id) as Summary
+    } else {
+      // Create new
+      return this.addSummary(meetingId, type, content)
+    }
+  }
+
   // --- Full-text search ---
 
   indexMeeting(meetingId: string, title: string, transcriptContent: string, summaryContent: string): void {

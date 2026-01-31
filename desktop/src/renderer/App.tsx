@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from "react"
 import { StatusBar } from "@/components/StatusBar"
-import { RecordingControls } from "@/components/RecordingControls"
 import { NotesEditor } from "@/components/NotesEditor"
 import { SettingsModal } from "@/components/SettingsModal"
 import { EndMeetingModal, BackgroundNotification } from "@/components/EndMeetingModal"
 import { SessionHistorySidebar } from "@/components/SessionHistory"
+import { HistorySessionView } from "@/components/HistorySessionView"
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert"
 import { Toast, ToastTitle, ToastDescription, ToastContainer } from "@/components/ui/toast"
 import { useRecording } from "@/hooks/useRecording"
@@ -13,6 +13,7 @@ import { useNotesEnhancement } from "@/hooks/useNotesEnhancement"
 import { useSettings } from "@/hooks/useSettings"
 import { useSessionHistory } from "@/hooks/useSessionHistory"
 import { applyTheme, getStoredTheme } from "@/lib/theme"
+import ComponentDemo from "@/ComponentDemo"
 
 const SIDEBAR_STORAGE_KEY = 'courier-sidebar-open'
 
@@ -111,6 +112,45 @@ function App() {
   useEffect(() => {
     setSidebarStoredState(sidebarOpen)
   }, [sidebarOpen])
+
+  // Handle sidebar close - reset selection
+  const handleSidebarClose = useCallback(() => {
+    setSidebarOpen(false)
+    sessionHistory.selectMeeting(null)
+  }, [sessionHistory])
+
+  // Handle returning to active session from history view
+  const handleReturnToActiveSession = useCallback(() => {
+    sessionHistory.selectMeeting(null)
+  }, [sessionHistory])
+
+  // Handle updating notes for a historical session
+  const handleHistoricalNotesChange = useCallback(async (meetingId: string, notes: string) => {
+    try {
+      // Update the enhanced summary in the database
+      await window.database.updateSummary(meetingId, "enhanced", notes)
+      // Refresh the meeting details to reflect the change
+      await sessionHistory.selectMeeting(meetingId)
+    } catch (error) {
+      showToast(
+        "Error",
+        error instanceof Error ? error.message : "Failed to save notes",
+        "destructive"
+      )
+    }
+  }, [sessionHistory, showToast])
+
+  // Handle deleting the currently viewed historical session
+  const handleDeleteHistoricalSession = useCallback(async () => {
+    if (sessionHistory.selectedMeetingId) {
+      const success = await sessionHistory.deleteMeeting(sessionHistory.selectedMeetingId)
+      return success
+    }
+    return false
+  }, [sessionHistory])
+
+  // Check if viewing a historical session
+  const isViewingHistory = sessionHistory.selectedMeetingId !== null && sessionHistory.selectedMeeting !== null
 
   // Initialize connection to Python
   useEffect(() => {
@@ -304,11 +344,6 @@ function App() {
   }, [recording, transcription, enhancement, showToast])
 
   // Compute derived state
-  const hasContent =
-    transcription.totalTranscript.length > 0 ||
-    notes.length > 0 ||
-    enhancement.enhancedNotes.length > 0
-
   const isDisabled = !connectionStatus.connected || !permissionGranted
   const currentError = recording.error || transcription.error || enhancement.error
 
@@ -321,62 +356,84 @@ function App() {
         permissionGranted={permissionGranted}
         error={currentError}
         onSettingsClick={() => setSettingsOpen(true)}
-        onHistoryClick={() => setSidebarOpen(true)}
+        onHistoryClick={() => setSidebarOpen(!sidebarOpen)}
       />
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-hidden p-6 flex flex-col min-h-0">
-        <div className="max-w-4xl mx-auto w-full flex flex-col gap-6 flex-1 min-h-0">
-          {/* Header */}
-          <div className="border-b border-slate-6 pb-4">
-            <h1 className="text-2xl font-bold text-slate-12">Courier</h1>
-            <p className="text-sm text-slate-11">Local-first meeting recorder</p>
-          </div>
-
+      {/* Main Content Area with Sidebar */}
+      <div className="flex-1 flex min-h-0 overflow-hidden">
+        {/* Main Content */}
+        <main className="flex-1 overflow-hidden flex flex-col min-h-0 min-w-0">
           {/* Permission Alert */}
           {!permissionGranted && !isInitializing && (
-            <Alert variant="warning">
-              <AlertTitle>Permission Required</AlertTitle>
-              <AlertDescription>
-                Please grant "Screen & System Audio Recording" permission in System
-                Settings → Privacy & Security to use Courier.
-              </AlertDescription>
-            </Alert>
+            <div className="px-6 pt-4">
+              <Alert variant="warning">
+                <AlertTitle>Permission Required</AlertTitle>
+                <AlertDescription>
+                  Please grant "Screen & System Audio Recording" permission in System
+                  Settings → Privacy & Security to use Courier.
+                </AlertDescription>
+              </Alert>
+            </div>
           )}
 
           {/* Connection Error */}
           {!connectionStatus.connected && !isInitializing && (
-            <Alert variant="destructive">
-              <AlertTitle>Connection Error</AlertTitle>
-              <AlertDescription>
-                {connectionStatus.error || "Unable to connect to Python backend."}
-              </AlertDescription>
-            </Alert>
+            <div className="px-6 pt-4">
+              <Alert variant="destructive">
+                <AlertTitle>Connection Error</AlertTitle>
+                <AlertDescription>
+                  {connectionStatus.error || "Unable to connect to Python backend."}
+                </AlertDescription>
+              </Alert>
+            </div>
           )}
 
-          {/* Recording Controls */}
-          <section className="space-y-4">
-            <RecordingControls
+          {/* Main content area - shows history view or notes editor */}
+          {isViewingHistory ? (
+            <HistorySessionView
+              meeting={sessionHistory.selectedMeeting!}
+              transcript={sessionHistory.transcript}
+              isLoading={sessionHistory.isLoadingDetails}
+              onDelete={handleDeleteHistoricalSession}
+              onNotesChange={handleHistoricalNotesChange}
+              onReturnToActiveSession={handleReturnToActiveSession}
+              isRecording={recording.isRecording}
+              recordingDuration={recording.duration}
+              className="flex-1"
+            />
+          ) : (
+            /* Notes Editor with integrated recording controls */
+            <NotesEditor
+              notes={notes}
+              onNotesChange={setNotes}
+              disabled={isDisabled}
               isRecording={recording.isRecording}
               isStopping={recording.isStopping}
               isTranscribing={transcription.isTranscribing}
               duration={recording.duration}
-              hasTranscript={hasContent}
+              hasTranscript={transcription.totalTranscript.length > 0}
               onStartRecording={recording.startRecording}
               onStopRecording={recording.stopRecording}
               onEndMeeting={handleEndMeeting}
-              disabled={isDisabled}
+              className="flex-1 p-6"
             />
-          </section>
+          )}
+        </main>
 
-          {/* Notes Editor */}
-          <NotesEditor
-            notes={notes}
-            onNotesChange={setNotes}
-            disabled={isDisabled}
-          />
-        </div>
-      </main>
+        {/* Session History Sidebar */}
+        <SessionHistorySidebar
+          open={sidebarOpen}
+          onClose={handleSidebarClose}
+          meetings={sessionHistory.meetings}
+          selectedMeetingId={sessionHistory.selectedMeetingId}
+          isLoading={sessionHistory.isLoading}
+          searchQuery={sessionHistory.searchQuery}
+          onSearchChange={sessionHistory.setSearchQuery}
+          onSelectMeeting={sessionHistory.selectMeeting}
+          onDeleteMeeting={sessionHistory.deleteMeeting}
+          isEmpty={sessionHistory.isEmpty}
+        />
+      </div>
 
       {/* Settings Modal */}
       <SettingsModal
@@ -427,23 +484,6 @@ function App() {
         isComplete={enhancement.isComplete}
         hasError={enhancement.hasError}
         onClick={handleRestoreModal}
-      />
-
-      {/* Session History Sidebar */}
-      <SessionHistorySidebar
-        open={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-        meetings={sessionHistory.meetings}
-        selectedMeetingId={sessionHistory.selectedMeetingId}
-        selectedMeeting={sessionHistory.selectedMeeting}
-        transcript={sessionHistory.transcript}
-        isLoading={sessionHistory.isLoading}
-        isLoadingDetails={sessionHistory.isLoadingDetails}
-        searchQuery={sessionHistory.searchQuery}
-        onSearchChange={sessionHistory.setSearchQuery}
-        onSelectMeeting={sessionHistory.selectMeeting}
-        onDeleteMeeting={sessionHistory.deleteMeeting}
-        isEmpty={sessionHistory.isEmpty}
       />
     </div>
   )
