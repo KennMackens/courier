@@ -23,14 +23,17 @@ class OllamaConfig:
 ENHANCE_PROMPT_EN = """You are a meeting notes assistant. The user took brief notes during a meeting, and you have access to the meeting transcript (which may be imperfect due to automatic transcription).
 
 Your task is to ENHANCE the user's notes by:
-1. Expanding bullet points with relevant details from the transcript
-2. Adding any important points the user may have missed
-3. Filling in names, numbers, dates, or specifics mentioned in the transcript
-4. Organizing the notes into clear sections
-5. Keeping the user's original structure and intent
+1. Starting with a concise meeting title on the first line (format: # Title Here)
+2. Expanding bullet points with relevant details from the transcript
+3. Adding any important points the user may have missed
+4. Filling in names, numbers, dates, or specifics mentioned in the transcript
+5. Organizing the notes into clear sections
+6. Keeping the user's original structure and intent
+
+IMPORTANT: Always start your response with a meeting title in the format "# Title" (5-10 words summarizing the main topic).
 
 The transcript quality may be poor - use it to extract meaning, not exact wording. Trust the user's notes for key topics.
-
+{title_instruction}
 USER'S NOTES:
 {user_notes}
 
@@ -42,14 +45,17 @@ ENHANCED MEETING NOTES:"""
 ENHANCE_PROMPT_NL = """Je bent een assistent voor vergadernotities. De gebruiker heeft korte aantekeningen gemaakt tijdens een vergadering, en je hebt toegang tot het vergadertranscript (dat mogelijk onvolmaakt is door automatische transcriptie).
 
 Je taak is om de aantekeningen van de gebruiker te VERBETEREN door:
-1. Opsommingstekens uit te breiden met relevante details uit het transcript
-2. Belangrijke punten toe te voegen die de gebruiker mogelijk heeft gemist
-3. Namen, nummers, data of specifieke details uit het transcript in te vullen
-4. De notities in duidelijke secties te organiseren
-5. De oorspronkelijke structuur en intentie van de gebruiker te behouden
+1. Te beginnen met een beknopte vergadertitel op de eerste regel (formaat: # Titel Hier)
+2. Opsommingstekens uit te breiden met relevante details uit het transcript
+3. Belangrijke punten toe te voegen die de gebruiker mogelijk heeft gemist
+4. Namen, nummers, data of specifieke details uit het transcript in te vullen
+5. De notities in duidelijke secties te organiseren
+6. De oorspronkelijke structuur en intentie van de gebruiker te behouden
+
+BELANGRIJK: Begin je antwoord altijd met een vergadertitel in het formaat "# Titel" (5-10 woorden die het hoofdonderwerp samenvatten).
 
 De kwaliteit van het transcript kan slecht zijn - gebruik het om betekenis te extraheren, niet exacte bewoordingen. Vertrouw op de aantekeningen van de gebruiker voor de hoofdonderwerpen.
-
+{title_instruction}
 AANTEKENINGEN GEBRUIKER:
 {user_notes}
 
@@ -61,6 +67,8 @@ VERBETERDE VERGADERNOTITIES:"""
 # Fallback prompt when only transcript is available (no user notes)
 NOTES_PROMPT_EN = """You are a meeting notes assistant. Analyze the following meeting transcript and generate clear, structured notes.
 
+IMPORTANT: Start with a concise meeting title in the format "# Title" (5-10 words summarizing the main topic).
+{title_instruction}
 Include:
 1. **Summary**: A brief 2-3 sentence overview of the meeting
 2. **Key Points**: The main topics discussed (bullet points)
@@ -77,6 +85,8 @@ MEETING NOTES:"""
 
 NOTES_PROMPT_NL = """Je bent een assistent voor vergadernotities. Analyseer het volgende vergadertranscript en genereer duidelijke, gestructureerde notities.
 
+BELANGRIJK: Begin met een beknopte vergadertitel in het formaat "# Titel" (5-10 woorden die het hoofdonderwerp samenvatten).
+{title_instruction}
 Neem op:
 1. **Samenvatting**: Een korte overview van 2-3 zinnen van de vergadering
 2. **Belangrijkste Punten**: De hoofdonderwerpen die besproken zijn (opsommingstekens)
@@ -205,7 +215,7 @@ class NotesGenerator:
         self._generation_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
-    def enhance_notes(self, user_notes: str, transcript: str, language: str = "en") -> None:
+    def enhance_notes(self, user_notes: str, transcript: str, language: str = "en", user_title: str = "") -> None:
         """
         Enhance user notes with transcript context in a background thread.
 
@@ -213,6 +223,7 @@ class NotesGenerator:
             user_notes: The user's handwritten notes during the meeting
             transcript: The auto-generated meeting transcript
             language: Language code for the prompt
+            user_title: Optional user-provided title to preserve
         """
         if self._generation_thread and self._generation_thread.is_alive():
             return  # Already generating
@@ -220,12 +231,12 @@ class NotesGenerator:
         self._stop_event.clear()
         self._generation_thread = threading.Thread(
             target=self._enhance_notes_thread,
-            args=(user_notes, transcript, language),
+            args=(user_notes, transcript, language, user_title),
             daemon=True
         )
         self._generation_thread.start()
 
-    def _enhance_notes_thread(self, user_notes: str, transcript: str, language: str):
+    def _enhance_notes_thread(self, user_notes: str, transcript: str, language: str, user_title: str = ""):
         """Background thread for note enhancement."""
         try:
             # Check if Ollama is available
@@ -248,15 +259,28 @@ class NotesGenerator:
                 if self.on_progress:
                     self.on_progress(f"Using model: {model}\n\n")
 
+            # Build title instruction based on whether user provided a title
+            if user_title:
+                title_instruction = f'\nUse this exact title: # {user_title}\n'
+            else:
+                title_instruction = ''
+
             # Choose prompt based on whether we have user notes
             if user_notes.strip():
                 # Enhance user notes with transcript
                 prompt_template = ENHANCE_PROMPTS.get(language, ENHANCE_PROMPT_EN)
-                prompt = prompt_template.format(user_notes=user_notes, transcript=transcript or "(No transcript available)")
+                prompt = prompt_template.format(
+                    user_notes=user_notes,
+                    transcript=transcript or "(No transcript available)",
+                    title_instruction=title_instruction
+                )
             else:
                 # No user notes - generate from transcript only
                 prompt_template = NOTES_PROMPTS.get(language, NOTES_PROMPT_EN)
-                prompt = prompt_template.format(transcript=transcript)
+                prompt = prompt_template.format(
+                    transcript=transcript,
+                    title_instruction=title_instruction
+                )
 
             # Generate with streaming
             full_response = []

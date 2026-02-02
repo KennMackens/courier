@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 
+// Enhancement status type
+export type EnhancementStatus = 'pending' | 'enhancing' | 'complete' | 'failed' | null
+
 // Types matching the database schema
 export interface Meeting {
   id: string
@@ -8,6 +11,8 @@ export interface Meeting {
   duration: number
   transcript_path: string | null
   audio_path: string | null
+  enhancement_status: EnhancementStatus
+  is_new: number | null
   created_at: string
   updated_at: string
 }

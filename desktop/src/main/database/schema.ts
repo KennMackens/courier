@@ -10,7 +10,7 @@ import * as fs from 'fs'
 import { app } from 'electron'
 
 // Schema version for migrations
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 
 // SQL statements for schema creation
 const CREATE_TABLES = `
@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS meetings (
   duration INTEGER DEFAULT 0,
   transcript_path TEXT,
   audio_path TEXT,
+  enhancement_status TEXT CHECK (enhancement_status IN ('pending', 'enhancing', 'complete', 'failed') OR enhancement_status IS NULL),
+  is_new INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -153,8 +155,11 @@ const MIGRATIONS: Record<number, string> = {
     -- Initial schema - nothing to migrate
     SELECT 1;
   `,
-  // Add future migrations here:
-  // 2: `ALTER TABLE meetings ADD COLUMN new_column TEXT;`,
+  2: `
+    -- Add enhancement_status and is_new columns for auto-save flow
+    ALTER TABLE meetings ADD COLUMN enhancement_status TEXT CHECK (enhancement_status IN ('pending', 'enhancing', 'complete', 'failed') OR enhancement_status IS NULL);
+    ALTER TABLE meetings ADD COLUMN is_new INTEGER;
+  `,
 }
 
 export function closeDatabase(db: Database.Database): void {

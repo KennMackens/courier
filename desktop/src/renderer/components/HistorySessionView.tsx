@@ -1,7 +1,16 @@
-import { useState, useCallback, useRef } from "react"
-import { Copy, Check, Trash2, ArrowLeft } from "lucide-react"
+import { useState, useCallback, useRef, useMemo } from "react"
+import ReactMarkdown from "react-markdown"
+import { flushSync } from "react-dom"
+import { createRoot } from "react-dom/client"
+import { Copy, Check, Trash2, ArrowLeft, Sparkles, Pencil, ChevronDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -61,7 +70,13 @@ export function HistorySessionView({
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
-  const bodyRef = useRef<HTMLTextAreaElement>(null)
+  const [isEditing, setIsEditing] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Check if notes are read-only during enhancement
+  const isEnhancing = meeting.enhancement_status === 'enhancing'
+  const isPending = meeting.enhancement_status === 'pending'
+  const isReadOnly = isEnhancing || isPending
 
   // Get enhanced notes (or raw if no enhanced)
   const getEnhancedNotes = useCallback(() => {
@@ -75,42 +90,15 @@ export function HistorySessionView({
   const [editedNotes, setEditedNotes] = useState<string | null>(null)
   const currentNotes = editedNotes !== null ? editedNotes : getEnhancedNotes()
 
-  // Split notes into title (first line) and body (rest)
-  const [title, ...bodyLines] = currentNotes.split("\n")
-  const body = bodyLines.join("\n")
-
-  const handleTitleChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const newTitle = e.target.value
-      const newNotes = body ? `${newTitle}\n${body}` : newTitle
-      setEditedNotes(newNotes)
-    },
-    [body]
-  )
-
-  const handleTitleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Enter") {
-        e.preventDefault()
-        const newNotes = `${title}\n${body}`
-        setEditedNotes(newNotes)
-        bodyRef.current?.focus()
-      }
-    },
-    [title, body]
-  )
-
-  const handleBodyChange = useCallback(
+  const handleNotesChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const newBody = e.target.value
-      const newNotes = title ? `${title}\n${newBody}` : newBody
-      setEditedNotes(newNotes)
+      setEditedNotes(e.target.value)
     },
-    [title]
+    []
   )
 
-  // Auto-save on blur
-  const handleBlur = useCallback(async () => {
+  // Save notes and exit edit mode
+  const handleSave = useCallback(async () => {
     if (editedNotes !== null && editedNotes !== getEnhancedNotes()) {
       setIsSaving(true)
       try {
@@ -119,10 +107,128 @@ export function HistorySessionView({
         setIsSaving(false)
       }
     }
+    setIsEditing(false)
   }, [editedNotes, getEnhancedNotes, meeting.id, onNotesChange])
 
-  // Copy content
-  const handleCopy = async () => {
+  // Enter edit mode
+  const handleEdit = useCallback(() => {
+    setEditedNotes(getEnhancedNotes())
+    setIsEditing(true)
+    // Focus textarea after render
+    setTimeout(() => textareaRef.current?.focus(), 0)
+  }, [getEnhancedNotes])
+
+  // Custom components for ReactMarkdown styling
+  const markdownComponents = useMemo(() => ({
+    h1: ({ children }: { children?: React.ReactNode }) => (
+      <h1 className="text-2xl font-bold text-foreground mb-4 mt-0">{children}</h1>
+    ),
+    h2: ({ children }: { children?: React.ReactNode }) => (
+      <h2 className="text-lg font-semibold text-foreground mb-3 mt-6">{children}</h2>
+    ),
+    h3: ({ children }: { children?: React.ReactNode }) => (
+      <h3 className="text-base font-semibold text-foreground mb-2 mt-4">{children}</h3>
+    ),
+    p: ({ children }: { children?: React.ReactNode }) => (
+      <p className="text-sm text-slate-12 mb-3 leading-relaxed">{children}</p>
+    ),
+    ul: ({ children }: { children?: React.ReactNode }) => (
+      <ul className="list-disc list-outside ml-5 mb-3 space-y-1">{children}</ul>
+    ),
+    ol: ({ children }: { children?: React.ReactNode }) => (
+      <ol className="list-decimal list-outside ml-5 mb-3 space-y-1">{children}</ol>
+    ),
+    li: ({ children }: { children?: React.ReactNode }) => (
+      <li className="text-sm text-slate-12">{children}</li>
+    ),
+    strong: ({ children }: { children?: React.ReactNode }) => (
+      <strong className="font-semibold text-foreground">{children}</strong>
+    ),
+    em: ({ children }: { children?: React.ReactNode }) => (
+      <em className="italic">{children}</em>
+    ),
+    code: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
+      // Check if it's a code block (has language class) or inline code
+      const isBlock = className?.includes("language-")
+      if (isBlock) {
+        return (
+          <code className={cn("block bg-slate-3 rounded-md p-3 text-sm overflow-x-auto", className)}>
+            {children}
+          </code>
+        )
+      }
+      return (
+        <code className="bg-slate-3 px-1.5 py-0.5 rounded text-sm font-mono">{children}</code>
+      )
+    },
+    pre: ({ children }: { children?: React.ReactNode }) => (
+      <pre className="bg-slate-3 rounded-md p-3 mb-3 overflow-x-auto">{children}</pre>
+    ),
+    blockquote: ({ children }: { children?: React.ReactNode }) => (
+      <blockquote className="border-l-4 border-jade-6 pl-4 my-3 text-slate-11 italic">{children}</blockquote>
+    ),
+    hr: () => <hr className="my-6 border-slate-6" />,
+    a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
+      <a href={href} className="text-jade-11 underline hover:text-jade-12" target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
+    ),
+  }), [])
+
+  // Convert markdown to HTML for rich text copy
+  const markdownToHtml = useCallback((markdown: string): string => {
+    // Create a temporary container
+    const container = document.createElement("div")
+    const root = createRoot(container)
+
+    // Render markdown synchronously
+    flushSync(() => {
+      root.render(
+        <ReactMarkdown components={markdownComponents}>{markdown}</ReactMarkdown>
+      )
+    })
+
+    const html = container.innerHTML
+    root.unmount()
+    return html
+  }, [markdownComponents])
+
+  // Copy as rich text (HTML) - default behavior
+  const handleCopyRichText = async () => {
+    const content = activeTab === "notes" ? currentNotes : transcript
+    if (!content) return
+
+    try {
+      if (activeTab === "notes") {
+        // Convert markdown to HTML for rich text copy
+        const html = markdownToHtml(content)
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "text/html": new Blob([html], { type: "text/html" }),
+            "text/plain": new Blob([content], { type: "text/plain" }),
+          }),
+        ])
+      } else {
+        // Transcript is plain text
+        await navigator.clipboard.writeText(content)
+      }
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      console.error("Failed to copy:", err)
+      // Fallback to plain text
+      try {
+        await navigator.clipboard.writeText(content)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      } catch {
+        console.error("Fallback copy also failed")
+      }
+    }
+  }
+
+  // Copy as markdown (plain text)
+  const handleCopyMarkdown = async () => {
     const content = activeTab === "notes" ? currentNotes : transcript
     if (!content) return
 
@@ -159,7 +265,7 @@ export function HistorySessionView({
   }
 
   return (
-    <div className={cn("relative flex flex-col h-full", className)}>
+    <div className={cn("relative flex flex-col overflow-hidden", className)}>
       {/* Tabs */}
       <div className="flex items-center justify-between border-b border-slate-6 px-6">
         <div className="flex">
@@ -186,24 +292,74 @@ export function HistorySessionView({
               Saving...
             </span>
           )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleCopy}
-            disabled={!hasContent}
-          >
-            {copied ? (
-              <>
-                <Check className="mr-1 h-4 w-4" />
-                Copied
-              </>
-            ) : (
-              <>
-                <Copy className="mr-1 h-4 w-4" />
-                Copy
-              </>
-            )}
-          </Button>
+          {activeTab === "notes" ? (
+            <div className="flex items-center">
+              {/* Main copy button - copies with formatting */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleCopyRichText}
+                disabled={!hasContent}
+                className="rounded-r-none pr-2"
+              >
+                {copied ? (
+                  <>
+                    <Check className="mr-1 h-4 w-4" />
+                    Copied
+                  </>
+                ) : (
+                  <>
+                    <Copy className="mr-1 h-4 w-4" />
+                    Copy
+                  </>
+                )}
+              </Button>
+              {/* Divider */}
+              <div className="h-4 w-px bg-slate-4" />
+              {/* Dropdown trigger for options */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={!hasContent}
+                    className="rounded-l-none pl-1 pr-1.5"
+                  >
+                    <ChevronDown className="h-3 w-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={handleCopyRichText}>
+                    <Copy className="mr-2 h-4 w-4" />
+                    Copy with formatting
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleCopyMarkdown}>
+                    <Copy className="mr-2 h-4 w-4" />
+                    Copy as Markdown
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCopyMarkdown}
+              disabled={!hasContent}
+            >
+              {copied ? (
+                <>
+                  <Check className="mr-1 h-4 w-4" />
+                  Copied
+                </>
+              ) : (
+                <>
+                  <Copy className="mr-1 h-4 w-4" />
+                  Copy
+                </>
+              )}
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -220,36 +376,70 @@ export function HistorySessionView({
       <div className="flex-1 min-h-0 overflow-auto p-6 pb-20">
         {activeTab === "notes" ? (
           <div className="flex flex-col">
-            {/* Title input - H1 style */}
-            <input
-              type="text"
-              value={title || ""}
-              onChange={handleTitleChange}
-              onKeyDown={handleTitleKeyDown}
-              onBlur={handleBlur}
-              placeholder="Title"
-              className={cn(
-                "w-full bg-transparent text-foreground font-bold text-2xl",
-                "placeholder:text-slate-9",
-                "border-0 outline-none focus:outline-none focus:ring-0",
-                "mb-2"
-              )}
-            />
+            {/* Read-only notice during enhancement */}
+            {isReadOnly && (
+              <div className="flex items-center gap-2 px-3 py-2 mb-4 rounded-md bg-jade-2 text-jade-11 text-sm">
+                <Sparkles className="h-4 w-4" />
+                <span>
+                  {isEnhancing
+                    ? "Notes are read-only while enhancement is in progress..."
+                    : "Notes are read-only while transcription is processing..."}
+                </span>
+              </div>
+            )}
 
-            {/* Body textarea - auto-grows with content */}
-            <textarea
-              ref={bodyRef}
-              value={body}
-              onChange={handleBodyChange}
-              onBlur={handleBlur}
-              placeholder="No notes for this meeting..."
-              rows={Math.max(10, body.split("\n").length + 2)}
-              className={cn(
-                "w-full resize-none bg-transparent text-foreground",
-                "placeholder:text-slate-9 text-base leading-relaxed",
-                "border-0 outline-none focus:outline-none focus:ring-0"
-              )}
-            />
+            {isEditing ? (
+              /* Edit mode - full markdown source in textarea */
+              <div className="flex flex-col gap-3">
+                <textarea
+                  ref={textareaRef}
+                  value={currentNotes}
+                  onChange={handleNotesChange}
+                  placeholder="Write your notes in Markdown..."
+                  rows={Math.max(15, currentNotes.split("\n").length + 2)}
+                  className={cn(
+                    "w-full resize-none bg-slate-2 text-slate-12 rounded-md p-4",
+                    "placeholder:text-slate-9 text-sm font-mono",
+                    "border border-slate-6 outline-none focus:outline-none focus:ring-2 focus:ring-jade-7"
+                  )}
+                />
+                <div className="flex justify-end">
+                  <Button variant="default" size="sm" onClick={handleSave} disabled={isSaving}>
+                    {isSaving ? (
+                      <>
+                        <Spinner size="sm" className="mr-2" />
+                        Saving...
+                      </>
+                    ) : (
+                      "Done"
+                    )}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              /* View mode - rendered markdown */
+              <div className="relative group">
+                {currentNotes.trim() ? (
+                  <ReactMarkdown components={markdownComponents}>
+                    {currentNotes}
+                  </ReactMarkdown>
+                ) : (
+                  <p className="text-slate-9 text-sm">No notes for this meeting...</p>
+                )}
+                {/* Edit button - shown on hover when not read-only */}
+                {!isReadOnly && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleEdit}
+                    className="absolute top-0 right-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <Pencil className="h-4 w-4 mr-1" />
+                    Edit
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <div className="text-sm text-slate-12 whitespace-pre-wrap">

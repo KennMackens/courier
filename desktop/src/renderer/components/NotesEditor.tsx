@@ -1,5 +1,5 @@
 import { useRef, useCallback } from "react"
-import { Mic, Square, Phone } from "lucide-react"
+import { Mic, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
@@ -17,7 +17,6 @@ interface NotesEditorProps {
   hasTranscript: boolean
   onStartRecording: () => void
   onStopRecording: () => void
-  onEndMeeting: () => void
 }
 
 function formatDuration(seconds: number): string {
@@ -38,7 +37,6 @@ export function NotesEditor({
   hasTranscript,
   onStartRecording,
   onStopRecording,
-  onEndMeeting,
 }: NotesEditorProps) {
   const bodyRef = useRef<HTMLTextAreaElement>(null)
 
@@ -101,7 +99,7 @@ export function NotesEditor({
         placeholder="Any thoughts?"
         disabled={disabled}
         className={cn(
-          "flex-1 w-full resize-none bg-transparent text-foreground",
+          "flex-1 w-full resize-none bg-transparent text-foreground font-sans",
           "placeholder:text-slate-9 text-base leading-relaxed",
           "border-0 outline-none focus:outline-none focus:ring-0",
           "disabled:cursor-not-allowed disabled:opacity-50"
@@ -164,18 +162,6 @@ export function NotesEditor({
           </Button>
         )}
 
-        {/* End Meeting button - show only after recording has happened */}
-        {hasTranscript && !isRecording && !isTranscribing && (
-          <Button
-            onClick={onEndMeeting}
-            disabled={disabled}
-            variant="default"
-            size="default"
-          >
-            <Phone className="mr-2 h-4 w-4" />
-            End Meeting
-          </Button>
-        )}
       </div>
     </div>
   )

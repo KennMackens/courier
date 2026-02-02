@@ -5,6 +5,9 @@
 import Database from 'better-sqlite3'
 import { v4 as uuid } from 'uuid'
 
+// Enhancement status type
+export type EnhancementStatus = 'pending' | 'enhancing' | 'complete' | 'failed' | null
+
 // Type definitions
 export interface Meeting {
   id: string
@@ -13,6 +16,8 @@ export interface Meeting {
   duration: number
   transcript_path: string | null
   audio_path: string | null
+  enhancement_status: EnhancementStatus
+  is_new: number | null
   created_at: string
   updated_at: string
 }
@@ -43,6 +48,8 @@ export interface CreateMeetingInput {
   duration?: number
   transcript_path?: string
   audio_path?: string
+  enhancement_status?: EnhancementStatus
+  is_new?: number | null
 }
 
 export interface UpdateMeetingInput {
@@ -50,6 +57,8 @@ export interface UpdateMeetingInput {
   duration?: number
   transcript_path?: string
   audio_path?: string
+  enhancement_status?: EnhancementStatus
+  is_new?: number | null
 }
 
 export interface MeetingListOptions {
@@ -69,8 +78,8 @@ export class MeetingQueries {
     const dateTime = input.date_time || new Date().toISOString()
 
     const stmt = this.db.prepare(`
-      INSERT INTO meetings (id, title, date_time, duration, transcript_path, audio_path)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO meetings (id, title, date_time, duration, transcript_path, audio_path, enhancement_status, is_new)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `)
 
     stmt.run(
@@ -79,7 +88,9 @@ export class MeetingQueries {
       dateTime,
       input.duration || 0,
       input.transcript_path || null,
-      input.audio_path || null
+      input.audio_path || null,
+      input.enhancement_status || null,
+      input.is_new ?? null
     )
 
     return this.getMeeting(id)!
@@ -142,6 +153,14 @@ export class MeetingQueries {
     if (input.audio_path !== undefined) {
       updates.push('audio_path = ?')
       values.push(input.audio_path)
+    }
+    if (input.enhancement_status !== undefined) {
+      updates.push('enhancement_status = ?')
+      values.push(input.enhancement_status)
+    }
+    if (input.is_new !== undefined) {
+      updates.push('is_new = ?')
+      values.push(input.is_new)
     }
 
     if (updates.length === 0) return this.getMeeting(id)

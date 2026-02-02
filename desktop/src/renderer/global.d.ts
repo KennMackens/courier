@@ -9,6 +9,9 @@ export interface Settings {
   availableModels: string[]
 }
 
+// Enhancement status type
+export type EnhancementStatus = 'pending' | 'enhancing' | 'complete' | 'failed' | null
+
 // Database types
 export interface Meeting {
   id: string
@@ -17,6 +20,8 @@ export interface Meeting {
   duration: number
   transcript_path: string | null
   audio_path: string | null
+  enhancement_status: EnhancementStatus
+  is_new: number | null
   created_at: string
   updated_at: string
 }
@@ -47,6 +52,8 @@ export interface CreateMeetingInput {
   duration?: number
   transcript_path?: string
   audio_path?: string
+  enhancement_status?: EnhancementStatus
+  is_new?: number | null
 }
 
 export interface MeetingListOptions {

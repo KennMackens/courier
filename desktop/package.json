@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
+    "react-markdown": "^10.1.0",
     "uuid": "^9.0.0"
   },
   "devDependencies": {

@@ -44,7 +44,7 @@ export function useNotesEnhancement(options: UseNotesEnhancementOptions = {}) {
 
   // Enhance notes
   const enhanceNotes = useCallback(
-    async (params: { notes: string; transcript?: string; language?: string }) => {
+    async (params: { notes: string; transcript?: string; language?: string; userTitle?: string }) => {
       // Reset accumulated notes
       enhancedNotesRef.current = ""
 

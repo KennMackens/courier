@@ -172,6 +172,10 @@
     @apply border-border;
   }
 
+  html, body {
+    @apply overflow-hidden h-full;
+  }
+
   body {
     @apply bg-background text-foreground;
     font-family: 'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
@@ -233,4 +237,18 @@
 .dark ::selection {
   background-color: var(--jade-5);
   color: var(--jade-12);
+}
+
+/* Pulsing border animation for enhancement status */
+@keyframes pulse-border {
+  0%, 100% {
+    box-shadow: 0 0 0 2px var(--jade-6);
+  }
+  50% {
+    box-shadow: 0 0 0 2px var(--jade-9);
+  }
+}
+
+.animate-pulse-border {
+  animation: pulse-border 2s ease-in-out infinite;
 }

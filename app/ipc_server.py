@@ -364,6 +364,7 @@ class IPCServer:
         notes = params.get("notes", "")
         transcript = params.get("transcript", self.transcript)
         language = params.get("language", self.settings.language)
+        user_title = params.get("userTitle", "")
 
         if not notes and not transcript:
             self.writer.send_error(
@@ -398,7 +399,7 @@ class IPCServer:
             on_error=on_error
         )
 
-        self._notes_generator.enhance_notes(notes, transcript, language)
+        self._notes_generator.enhance_notes(notes, transcript, language, user_title)
 
         # Send acknowledgment
         self.writer.send_stream(request_id, {"status": "started"}, done=False)

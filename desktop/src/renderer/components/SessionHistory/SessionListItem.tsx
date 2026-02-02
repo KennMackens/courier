@@ -1,7 +1,14 @@
 import { useState, useRef, useEffect } from "react"
-import { Calendar, Clock, Trash2 } from "lucide-react"
+import { Calendar, Clock, Trash2, Sparkles, AlertCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Meeting } from "@/hooks/useSessionHistory"
+
+// Check if meeting is "new" (within 24 hours of is_new timestamp)
+function isNewMeeting(isNewTimestamp: number | null): boolean {
+  if (!isNewTimestamp) return false
+  const twentyFourHours = 24 * 60 * 60 * 1000
+  return Date.now() - isNewTimestamp < twentyFourHours
+}
 
 interface SessionListItemProps {
   meeting: Meeting
@@ -64,6 +71,12 @@ export function SessionListItem({ meeting, isSelected, onClick, onDelete }: Sess
   // Get display title
   const title = meeting.title || `Meeting - ${formatDate(meeting.date_time)}`
 
+  // Enhancement status indicators
+  const isEnhancing = meeting.enhancement_status === 'enhancing'
+  const isPending = meeting.enhancement_status === 'pending'
+  const isFailed = meeting.enhancement_status === 'failed'
+  const isNew = isNewMeeting(meeting.is_new)
+
   return (
     <>
       <button
@@ -72,19 +85,47 @@ export function SessionListItem({ meeting, isSelected, onClick, onDelete }: Sess
         className={cn(
           "w-full text-left p-3 rounded-md transition-colors",
           "hover:bg-slate-3 focus:outline-none focus:ring-2 focus:ring-primary-7",
-          isSelected && "bg-slate-4 hover:bg-slate-4"
+          isSelected && "bg-slate-4 hover:bg-slate-4",
+          // Pulsing border during enhancement
+          isEnhancing && "ring-2 ring-jade-7 animate-pulse-border"
         )}
       >
         <div className="flex flex-col gap-1">
-          {/* Title */}
-          <span
-            className={cn(
-              "text-sm font-medium truncate",
-              isSelected ? "text-slate-12" : "text-slate-11"
+          {/* Title row with status chips */}
+          <div className="flex items-center gap-2">
+            <span
+              className={cn(
+                "text-sm font-medium truncate flex-1",
+                isSelected ? "text-slate-12" : "text-slate-11"
+              )}
+            >
+              {title}
+            </span>
+
+            {/* Status chips */}
+            {isEnhancing && (
+              <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-jade-3 text-jade-11 rounded">
+                <Sparkles className="h-2.5 w-2.5" />
+                Enhancing
+              </span>
             )}
-          >
-            {title}
-          </span>
+            {isPending && (
+              <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-slate-3 text-slate-10 rounded">
+                Pending
+              </span>
+            )}
+            {isFailed && (
+              <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-red-3 text-red-11 rounded">
+                <AlertCircle className="h-2.5 w-2.5" />
+                Failed
+              </span>
+            )}
+            {isNew && !isEnhancing && !isPending && (
+              <span className="px-1.5 py-0.5 text-[10px] font-medium bg-pink-3 text-pink-11 rounded">
+                New
+              </span>
+            )}
+          </div>
 
           {/* Metadata */}
           <div className="flex items-center gap-3 text-xs text-slate-9">

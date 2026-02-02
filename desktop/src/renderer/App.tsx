@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from "react"
 import { StatusBar } from "@/components/StatusBar"
 import { NotesEditor } from "@/components/NotesEditor"
 import { SettingsModal } from "@/components/SettingsModal"
-import { EndMeetingModal, BackgroundNotification } from "@/components/EndMeetingModal"
 import { SessionHistorySidebar } from "@/components/SessionHistory"
 import { HistorySessionView } from "@/components/HistorySessionView"
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert"
@@ -10,6 +9,7 @@ import { Toast, ToastTitle, ToastDescription, ToastContainer } from "@/component
 import { useRecording } from "@/hooks/useRecording"
 import { useTranscription } from "@/hooks/useTranscription"
 import { useNotesEnhancement } from "@/hooks/useNotesEnhancement"
+import { useEnhancementQueue } from "@/hooks/useEnhancementQueue"
 import { useSettings } from "@/hooks/useSettings"
 import { useSessionHistory } from "@/hooks/useSessionHistory"
 import { applyTheme, getStoredTheme } from "@/lib/theme"
@@ -26,6 +26,30 @@ function setSidebarStoredState(open: boolean): void {
   localStorage.setItem(SIDEBAR_STORAGE_KEY, open.toString())
 }
 
+// Extract title from notes (first line) or generate fallback
+function extractTitleFromNotes(notes: string): string {
+  if (!notes.trim()) {
+    return formatMeetingTitle(new Date())
+  }
+  const firstLine = notes.split("\n")[0].trim()
+  // Remove markdown headers if present
+  const cleanTitle = firstLine.replace(/^#+\s*/, "").trim()
+  return cleanTitle.slice(0, 100) || formatMeetingTitle(new Date())
+}
+
+// Format meeting title with date/time
+function formatMeetingTitle(date: Date): string {
+  const options: Intl.DateTimeFormatOptions = {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }
+  return `Meeting - ${date.toLocaleString('en-US', options)}`
+}
+
 interface ConnectionStatus {
   connected: boolean
   version?: string
@@ -39,6 +63,7 @@ interface ToastState {
   variant: "default" | "destructive" | "success"
   title: string
   description?: string
+  onClick?: () => void
 }
 
 function App() {
@@ -53,25 +78,111 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [notes, setNotes] = useState("")
   const [toasts, setToasts] = useState<ToastState[]>([])
-  const [endMeetingModalOpen, setEndMeetingModalOpen] = useState(false)
-  const [isBackgrounded, setIsBackgrounded] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(() => getSidebarStoredState())
+
+  // Track current meeting being processed (for auto-save flow)
+  const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null)
 
   // Custom hooks
   const recording = useRecording({
     onError: (error) => showToast("Recording Error", error, "destructive"),
-    onStopped: () => {
-      // Auto-transcribe after stopping
-      transcription.transcribe({
-        language: settings.settings.language,
-        model: settings.settings.whisperModel,
-      })
+    onStopped: async (audioLength, duration) => {
+      // Auto-save meeting immediately when recording stops
+      try {
+        const title = extractTitleFromNotes(notes)
+        const meeting = await window.database.createMeeting({
+          title,
+          date_time: new Date().toISOString(),
+          duration: duration || recording.duration,
+          enhancement_status: 'pending',
+          is_new: Date.now(),
+        })
+
+        // Save raw notes as 'original' summary
+        if (notes.trim()) {
+          await window.database.addSummary(meeting.id, "original", notes)
+        }
+
+        // Track the meeting being processed
+        setCurrentMeetingId(meeting.id)
+
+        // Add to session history and open sidebar
+        sessionHistory.addMeeting(meeting)
+        setSidebarOpen(true)
+        sessionHistory.selectMeeting(meeting.id)
+
+        showToast("Meeting Saved", "Recording saved. Transcribing...", "success")
+
+        // Auto-transcribe after saving
+        transcription.transcribe({
+          language: settings.settings.language,
+          model: settings.settings.whisperModel,
+        })
+      } catch (error) {
+        showToast(
+          "Error",
+          error instanceof Error ? error.message : "Failed to save meeting",
+          "destructive"
+        )
+        // Still try to transcribe even if save failed
+        transcription.transcribe({
+          language: settings.settings.language,
+          model: settings.settings.whisperModel,
+        })
+      }
     },
   })
 
   const transcription = useTranscription({
-    onComplete: () => {
-      showToast("Transcription Complete", "Audio has been transcribed.", "success")
+    onComplete: async (transcript: string) => {
+      // Save transcript to current meeting if one exists
+      if (currentMeetingId && transcript.trim()) {
+        try {
+          // Save transcript to file and update meeting
+          await window.database.saveTranscript(currentMeetingId, transcript)
+
+          // Get the meeting title for indexing
+          const meeting = await window.database.getMeeting(currentMeetingId)
+          if (meeting) {
+            await window.database.indexMeeting(
+              currentMeetingId,
+              meeting.title || "",
+              transcript,
+              "" // No enhanced notes yet
+            )
+          }
+
+          // Refresh the meeting details in the sidebar
+          await sessionHistory.refresh()
+          if (sessionHistory.selectedMeetingId === currentMeetingId) {
+            sessionHistory.selectMeeting(currentMeetingId)
+          }
+
+          // Auto-enqueue enhancement after transcription completes
+          // Get the original notes from the database
+          const originalSummary = await window.database.getSummaryByType(currentMeetingId, "original")
+          const originalNotes = originalSummary?.content || ""
+
+          // Extract user title from original notes
+          const [firstLine] = originalNotes.split("\n")
+          const userTitle = firstLine?.trim() || ""
+
+          enhancementQueue.enqueueEnhancement({
+            meetingId: currentMeetingId,
+            notes: originalNotes,
+            transcript: transcript,
+            language: settings.settings.language,
+            userTitle,
+          })
+
+          showToast("Transcription Complete", "Audio transcribed. Enhancement starting...", "success")
+        } catch (error) {
+          console.error("Failed to save transcript:", error)
+          showToast("Transcription Complete", "Audio has been transcribed.", "success")
+        }
+      } else {
+        showToast("Transcription Complete", "Audio has been transcribed.", "success")
+      }
     },
     onError: (error) => showToast("Transcription Error", error, "destructive"),
   })
@@ -90,13 +201,54 @@ function App() {
     onMeetingDeleted: () => showToast("Meeting Deleted", "The meeting has been removed.", "default"),
   })
 
+  // Enhancement queue for automatic background processing
+  const enhancementQueue = useEnhancementQueue({
+    onEnhancementStart: (meetingId) => {
+      console.log(`[Enhancement] Started enhancing meeting ${meetingId}`)
+    },
+    onEnhancementComplete: async (meetingId, enhancedNotes) => {
+      // Refresh sidebar to show updated status
+      await sessionHistory.refresh()
+      if (sessionHistory.selectedMeetingId === meetingId) {
+        sessionHistory.selectMeeting(meetingId)
+      }
+
+      // Show toast if user is not viewing the enhanced meeting
+      if (sessionHistory.selectedMeetingId !== meetingId) {
+        const meeting = await window.database.getMeeting(meetingId)
+        showToast(
+          "Enhancement Complete",
+          `"${meeting?.title || 'Meeting'}" has been enhanced.`,
+          "success",
+          () => {
+            // Navigate to the enhanced meeting when toast is clicked
+            setSidebarOpen(true)
+            sessionHistory.selectMeeting(meetingId)
+          }
+        )
+      }
+    },
+    onEnhancementError: async (meetingId, error) => {
+      console.error(`[Enhancement] Failed for meeting ${meetingId}:`, error)
+      await sessionHistory.refresh()
+      showToast("Enhancement Failed", error, "destructive")
+    },
+    onStatusChange: async (meetingId, status) => {
+      // Refresh meeting in sidebar when status changes
+      await sessionHistory.refresh()
+      if (sessionHistory.selectedMeetingId === meetingId) {
+        sessionHistory.selectMeeting(meetingId)
+      }
+    },
+  })
+
   // Toast helper
   const showToast = useCallback(
-    (title: string, description: string, variant: ToastState["variant"] = "default") => {
+    (title: string, description: string, variant: ToastState["variant"] = "default", onClick?: () => void) => {
       const id = Date.now().toString()
-      setToasts((prev) => [...prev, { id, title, description, variant }])
+      setToasts((prev) => [...prev, { id, title, description, variant, onClick }])
 
-      // Auto-dismiss after 5 seconds
+      // Auto-dismiss after 5 seconds (unless user clicks)
       setTimeout(() => {
         setToasts((prev) => prev.filter((t) => t.id !== id))
       }, 5000)
@@ -127,8 +279,21 @@ function App() {
   // Handle updating notes for a historical session
   const handleHistoricalNotesChange = useCallback(async (meetingId: string, notes: string) => {
     try {
+      // Extract title from first line of notes
+      const [firstLine] = notes.split("\n")
+      const newTitle = firstLine?.replace(/^#+\s*/, "").trim().slice(0, 100)
+
+      // Update the meeting title if it changed
+      if (newTitle) {
+        await window.database.updateMeeting(meetingId, { title: newTitle })
+      }
+
       // Update the enhanced summary in the database
       await window.database.updateSummary(meetingId, "enhanced", notes)
+
+      // Refresh the sidebar to show updated title
+      await sessionHistory.refresh()
+
       // Refresh the meeting details to reflect the change
       await sessionHistory.selectMeeting(meetingId)
     } catch (error) {
@@ -203,145 +368,20 @@ function App() {
     }
   }, [showToast])
 
-  // Handle enhance notes
-  const handleEnhanceNotes = useCallback(() => {
-    if (!notes.trim()) return
+  // Handle starting a new recording - resets state for fresh session
+  const handleStartRecording = useCallback(async () => {
+    // Clear state for new session
+    setNotes("")
+    setCurrentMeetingId(null)
+    transcription.clearTranscript()
+    enhancement.clearEnhancedNotes()
 
-    enhancement.enhanceNotes({
-      notes,
-      transcript: transcription.totalTranscript,
-      language: settings.settings.language,
-    })
-  }, [notes, transcription.totalTranscript, settings.settings.language, enhancement])
+    // Deselect any selected meeting to show fresh editor
+    sessionHistory.selectMeeting(null)
 
-  // Handle end meeting - opens modal and triggers enhancement
-  const handleEndMeeting = useCallback(() => {
-    setEndMeetingModalOpen(true)
-    setIsBackgrounded(false)
-
-    // Auto-trigger enhancement if there's content
-    const hasNotes = notes.trim().length > 0
-    const hasTranscript = transcription.totalTranscript.trim().length > 0
-
-    if (hasNotes || hasTranscript) {
-      enhancement.clearEnhancedNotes()
-      enhancement.enhanceNotes({
-        notes,
-        transcript: transcription.totalTranscript,
-        language: settings.settings.language,
-      })
-    }
-  }, [notes, transcription.totalTranscript, settings.settings.language, enhancement])
-
-  // Handle backgrounding the modal
-  const handleBackground = useCallback(() => {
-    setIsBackgrounded(true)
-    setEndMeetingModalOpen(false)
-  }, [])
-
-  // Handle restoring the modal from background
-  const handleRestoreModal = useCallback(() => {
-    setIsBackgrounded(false)
-    setEndMeetingModalOpen(true)
-  }, [])
-
-  // Extract title from enhanced notes (first line or fallback)
-  const extractTitle = useCallback((enhancedNotes: string) => {
-    if (!enhancedNotes.trim()) return null
-    // Try to get the first line as title
-    const firstLine = enhancedNotes.split("\n")[0].trim()
-    // Remove markdown headers if present
-    const cleanTitle = firstLine.replace(/^#+\s*/, "").trim()
-    // Limit length
-    return cleanTitle.slice(0, 100) || null
-  }, [])
-
-  // Handle saving and closing the meeting
-  const handleSave = useCallback(async () => {
-    try {
-      // Extract title from enhanced notes
-      const title = extractTitle(enhancement.enhancedNotes) || `Meeting - ${new Date().toLocaleDateString()}`
-
-      // Create meeting in database
-      const meeting = await window.database.createMeeting({
-        title,
-        date_time: new Date().toISOString(),
-        duration: recording.duration,
-      })
-
-      // Save raw notes as 'original' summary
-      if (notes.trim()) {
-        await window.database.addSummary(meeting.id, "original", notes)
-      }
-
-      // Save enhanced notes as 'enhanced' summary
-      if (enhancement.enhancedNotes.trim()) {
-        await window.database.addSummary(meeting.id, "enhanced", enhancement.enhancedNotes)
-      }
-
-      // Save transcript to file
-      if (transcription.totalTranscript.trim()) {
-        await window.database.saveTranscript(meeting.id, transcription.totalTranscript)
-
-        // Index for search
-        await window.database.indexMeeting(
-          meeting.id,
-          title,
-          transcription.totalTranscript,
-          enhancement.enhancedNotes
-        )
-      }
-
-      // Reset Python session
-      await window.python.resetSession()
-
-      // Add meeting to history and open sidebar
-      sessionHistory.addMeeting(meeting)
-
-      // Reset all state
-      recording.reset()
-      transcription.clearTranscript()
-      enhancement.clearEnhancedNotes()
-      setNotes("")
-      setEndMeetingModalOpen(false)
-      setIsBackgrounded(false)
-
-      // Open sidebar to show saved meeting
-      setSidebarOpen(true)
-      sessionHistory.selectMeeting(meeting.id)
-
-      showToast("Meeting Saved", "Your meeting notes have been saved.", "success")
-    } catch (error) {
-      showToast(
-        "Error",
-        error instanceof Error ? error.message : "Failed to save meeting",
-        "destructive"
-      )
-    }
-  }, [recording, transcription, enhancement, notes, extractTitle, sessionHistory, showToast])
-
-  // Handle discarding the meeting
-  const handleDiscard = useCallback(async () => {
-    try {
-      await window.python.resetSession()
-
-      // Reset all state
-      recording.reset()
-      transcription.clearTranscript()
-      enhancement.clearEnhancedNotes()
-      setNotes("")
-      setEndMeetingModalOpen(false)
-      setIsBackgrounded(false)
-
-      showToast("Meeting Discarded", "Session has been discarded.", "default")
-    } catch (error) {
-      showToast(
-        "Error",
-        error instanceof Error ? error.message : "Failed to discard meeting",
-        "destructive"
-      )
-    }
-  }, [recording, transcription, enhancement, showToast])
+    // Start recording
+    await recording.startRecording()
+  }, [recording, transcription, enhancement, sessionHistory])
 
   // Compute derived state
   const isDisabled = !connectionStatus.connected || !permissionGranted
@@ -412,9 +452,8 @@ function App() {
               isTranscribing={transcription.isTranscribing}
               duration={recording.duration}
               hasTranscript={transcription.totalTranscript.length > 0}
-              onStartRecording={recording.startRecording}
+              onStartRecording={handleStartRecording}
               onStopRecording={recording.stopRecording}
-              onEndMeeting={handleEndMeeting}
               className="flex-1 p-6"
             />
           )}
@@ -453,38 +492,25 @@ function App() {
             key={toast.id}
             variant={toast.variant}
             onClose={() => dismissToast(toast.id)}
+            onClick={toast.onClick ? () => {
+              toast.onClick?.()
+              dismissToast(toast.id)
+            } : undefined}
+            className={toast.onClick ? "cursor-pointer hover:opacity-90" : undefined}
           >
             <ToastTitle>{toast.title}</ToastTitle>
             {toast.description && (
               <ToastDescription>{toast.description}</ToastDescription>
             )}
+            {toast.onClick && (
+              <ToastDescription className="text-xs mt-1 opacity-75">
+                Click to view
+              </ToastDescription>
+            )}
           </Toast>
         ))}
       </ToastContainer>
 
-      {/* End Meeting Modal */}
-      <EndMeetingModal
-        open={endMeetingModalOpen}
-        onOpenChange={setEndMeetingModalOpen}
-        rawNotes={notes}
-        transcript={transcription.totalTranscript}
-        enhancedNotes={enhancement.enhancedNotes}
-        isEnhancing={enhancement.isEnhancing}
-        enhancementError={enhancement.error}
-        onEnhance={handleEnhanceNotes}
-        onBackground={handleBackground}
-        onSave={handleSave}
-        onDiscard={handleDiscard}
-      />
-
-      {/* Background Notification */}
-      <BackgroundNotification
-        visible={isBackgrounded}
-        isEnhancing={enhancement.isEnhancing}
-        isComplete={enhancement.isComplete}
-        hasError={enhancement.hasError}
-        onClick={handleRestoreModal}
-      />
     </div>
   )
 }
