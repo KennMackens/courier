@@ -430,30 +430,55 @@ export function SettingsModal({
                     <p className="text-sm font-semibold text-slate-12">Microphone</p>
                     <div
                       className={cn(
-                        "flex items-center justify-between p-3 rounded-lg border",
+                        "relative flex items-center justify-between p-3 rounded-lg border overflow-hidden",
                         micStatus === "active"
-                          ? "bg-jade-2 border-jade-6"
-                          : "bg-amber-2 border-amber-6"
+                          ? "bg-jade-3/50 border-jade-7"
+                          : "bg-amber-3/40 border-amber-7"
                       )}
                     >
-                      <div className="flex items-center gap-3">
-                        {micStatus === "active" ? (
-                          <Mic className="h-5 w-5 text-jade-11" />
-                        ) : (
-                          <MicOff className="h-5 w-5 text-amber-11" />
+                      <span
+                        className={cn(
+                          "absolute left-0 top-0 h-full w-1",
+                          micStatus === "active" ? "bg-jade-9" : "bg-amber-9"
                         )}
+                      />
+                      <div className="flex items-center gap-3 pl-2">
+                        <div
+                          className={cn(
+                            "flex h-10 w-10 items-center justify-center rounded-full",
+                            micStatus === "active" ? "bg-jade-4" : "bg-amber-4"
+                          )}
+                        >
+                          {micStatus === "active" ? (
+                            <Mic className="h-5 w-5 text-jade-12" />
+                          ) : (
+                            <MicOff className="h-5 w-5 text-amber-12" />
+                          )}
+                        </div>
                         <div>
-                          <p
-                            className={cn(
-                              "text-sm font-medium",
-                              micStatus === "active" ? "text-jade-12" : "text-amber-12"
-                            )}
-                          >
-                            {micStatus === "active" && "Microphone ready"}
-                            {micStatus === "denied" && "Microphone blocked"}
-                            {micStatus === "not_granted" && "Permission required"}
-                            {micStatus === "unknown" && "Microphone status unknown"}
-                          </p>
+                          <div className="flex items-center gap-2">
+                            <p
+                              className={cn(
+                                "text-sm font-semibold",
+                                micStatus === "active" ? "text-jade-12" : "text-amber-12"
+                              )}
+                            >
+                              {micStatus === "active" && "Microphone ready"}
+                              {micStatus === "denied" && "Microphone blocked"}
+                              {micStatus === "not_granted" && "Permission required"}
+                              {micStatus === "unknown" && "Microphone status unknown"}
+                            </p>
+                            <span
+                              className={cn(
+                                "text-[11px] px-2 py-0.5 rounded-full border",
+                                micStatus === "active"
+                                  ? "text-jade-12 border-jade-7 bg-jade-3/70"
+                                  : "text-amber-12 border-amber-7 bg-amber-3/70"
+                              )}
+                            >
+                              {micStatus === "active" ? "Ready" : "Action needed"}
+                            </span>
+                          </div>
                           <p className="text-xs text-slate-11">
                             {micTooltip ||
                               (micStatus === "active"
@@ -468,6 +493,7 @@ export function SettingsModal({
                         size="sm"
                         onClick={onMicClick}
                         disabled={!onMicClick}
+                        className="relative z-10"
                       >
                         Open System Settings
                       </Button>
@@ -477,28 +503,53 @@ export function SettingsModal({
                       <p className="text-sm font-semibold text-slate-12">System Audio</p>
                       <div
                         className={cn(
-                          "flex items-center justify-between p-3 rounded-lg border",
+                          "relative flex items-center justify-between p-3 rounded-lg border overflow-hidden",
                           systemAudioAvailable
-                            ? "bg-jade-2 border-jade-6"
-                            : "bg-amber-2 border-amber-6"
+                            ? "bg-jade-3/50 border-jade-7"
+                            : "bg-amber-3/40 border-amber-7"
                         )}
                       >
-                        <div className="flex items-center gap-3">
-                          <Volume2
+                        <span
+                          className={cn(
+                            "absolute left-0 top-0 h-full w-1",
+                            systemAudioAvailable ? "bg-jade-9" : "bg-amber-9"
+                          )}
+                        />
+                        <div className="flex items-center gap-3 pl-2">
+                          <div
                             className={cn(
-                              "h-5 w-5",
-                              systemAudioAvailable ? "text-jade-11" : "text-amber-11"
+                              "flex h-10 w-10 items-center justify-center rounded-full",
+                              systemAudioAvailable ? "bg-jade-4" : "bg-amber-4"
                             )}
-                          />
-                          <div>
-                            <p
+                          >
+                            <Volume2
                               className={cn(
-                                "text-sm font-medium",
+                                "h-5 w-5",
                                 systemAudioAvailable ? "text-jade-12" : "text-amber-12"
                               )}
-                            >
-                              {systemAudioAvailable ? "System audio ready" : "Permission required"}
-                            </p>
+                            />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p
+                                className={cn(
+                                  "text-sm font-semibold",
+                                  systemAudioAvailable ? "text-jade-12" : "text-amber-12"
+                                )}
+                              >
+                                {systemAudioAvailable ? "System audio ready" : "Permission required"}
+                              </p>
+                              <span
+                                className={cn(
+                                  "text-[11px] px-2 py-0.5 rounded-full border",
+                                  systemAudioAvailable
+                                    ? "text-jade-12 border-jade-7 bg-jade-3/70"
+                                    : "text-amber-12 border-amber-7 bg-amber-3/70"
+                                )}
+                              >
+                                {systemAudioAvailable ? "Ready" : "Action needed"}
+                              </span>
+                            </div>
                             <p className="text-xs text-slate-11">
                               {systemAudioAvailable
                                 ? "Courier can record your system audio."
@@ -512,6 +563,7 @@ export function SettingsModal({
                           size="sm"
                           onClick={onMicClick}
                           disabled={!onMicClick}
+                          className="relative z-10"
                         >
                           Open System Settings
                         </Button>
