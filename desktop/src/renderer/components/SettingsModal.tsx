@@ -1,5 +1,5 @@
 import * as React from "react"
-import { RefreshCw, Trash2, CheckCircle2, AlertCircle, ChevronDown, LogOut, User as UserIcon, Heart, HelpCircle, Bird } from "lucide-react"
+import { RefreshCw, Trash2, CheckCircle2, AlertCircle, ChevronDown, LogOut, User as UserIcon, Heart, HelpCircle, Bird, Mic, MicOff, Volume2 } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -47,11 +47,17 @@ interface SettingsModalProps {
   isSaving: boolean
   error: string | null
   onSave: (settings: Partial<Settings>) => Promise<void>
+  micStatus: "unknown" | "active" | "denied" | "not_granted"
+  micTooltip?: string | null
+  onMicClick?: () => void
+  isSystemAudioOnly?: boolean
+  systemAudioAvailable?: boolean
 }
 
-type SettingsTab = "transcription" | "enhancement" | "appearance" | "account"
+type SettingsTab = "recording" | "transcription" | "enhancement" | "appearance" | "account"
 
 const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
+  { id: "recording", label: "Recording" },
   { id: "transcription", label: "Transcription" },
   { id: "enhancement", label: "Enhancement" },
   { id: "appearance", label: "Appearance" },
@@ -114,6 +120,11 @@ export function SettingsModal({
   isSaving,
   error,
   onSave,
+  micStatus,
+  micTooltip,
+  onMicClick,
+  isSystemAudioOnly,
+  systemAudioAvailable = false,
 }: SettingsModalProps) {
   // Local form state (for cancel behavior)
   const [formState, setFormState] = React.useState<Settings>(settings)
@@ -136,6 +147,9 @@ export function SettingsModal({
     })
     return map
   }, [modelManager.availableModels])
+
+  const getLabel = <T extends { value: string; label: string }>(options: readonly T[], value: string) =>
+    options.find((o) => o.value === value)?.label || value
 
   // Ollama models state (deprecated, kept for advanced users)
   const [ollamaModels, setOllamaModels] = React.useState<string[]>([])
@@ -338,7 +352,9 @@ export function SettingsModal({
                         onValueChange={(value) => updateField("language", value)}
                       >
                         <SelectTrigger id="language">
-                          <SelectValue placeholder="Select language" />
+                          <span className="truncate text-left">
+                            {getLabel(LANGUAGE_OPTIONS, formState.language)}
+                          </span>
                         </SelectTrigger>
                         <SelectContent>
                           {LANGUAGE_OPTIONS.map((option) => (
@@ -358,7 +374,9 @@ export function SettingsModal({
                         onValueChange={(value) => updateField("whisperModel", value)}
                       >
                         <SelectTrigger id="whisperModel">
-                          <SelectValue placeholder="Select model" />
+                          <span className="truncate text-left">
+                            {getLabel(WHISPER_MODEL_OPTIONS, formState.whisperModel)}
+                          </span>
                         </SelectTrigger>
                         <SelectContent>
                           {WHISPER_MODEL_OPTIONS.map((option) => (
@@ -396,6 +414,108 @@ export function SettingsModal({
                       <p className="text-xs text-slate-10">
                         Recordings shorter than this will prompt to keep or discard
                       </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "recording" && (
+                <div
+                  className="space-y-6"
+                  role="tabpanel"
+                  id="settings-panel-recording"
+                  aria-labelledby="settings-tab-recording"
+                >
+                  <div className="space-y-3">
+                    <p className="text-sm font-semibold text-slate-12">Microphone</p>
+                    <div
+                      className={cn(
+                        "flex items-center justify-between p-3 rounded-lg border",
+                        micStatus === "active"
+                          ? "bg-jade-2 border-jade-6"
+                          : "bg-amber-2 border-amber-6"
+                      )}
+                    >
+                      <div className="flex items-center gap-3">
+                        {micStatus === "active" ? (
+                          <Mic className="h-5 w-5 text-jade-11" />
+                        ) : (
+                          <MicOff className="h-5 w-5 text-amber-11" />
+                        )}
+                        <div>
+                          <p
+                            className={cn(
+                              "text-sm font-medium",
+                              micStatus === "active" ? "text-jade-12" : "text-amber-12"
+                            )}
+                          >
+                            {micStatus === "active" && "Microphone ready"}
+                            {micStatus === "denied" && "Microphone blocked"}
+                            {micStatus === "not_granted" && "Permission required"}
+                            {micStatus === "unknown" && "Microphone status unknown"}
+                          </p>
+                          <p className="text-xs text-slate-11">
+                            {micTooltip ||
+                              (micStatus === "active"
+                                ? "Courier can access your microphone."
+                                : "Open System Settings to adjust microphone permissions.")}
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={onMicClick}
+                        disabled={!onMicClick}
+                      >
+                        Open System Settings
+                      </Button>
+                    </div>
+
+                    <div className="space-y-3 pt-1">
+                      <p className="text-sm font-semibold text-slate-12">System Audio</p>
+                      <div
+                        className={cn(
+                          "flex items-center justify-between p-3 rounded-lg border",
+                          systemAudioAvailable
+                            ? "bg-jade-2 border-jade-6"
+                            : "bg-amber-2 border-amber-6"
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <Volume2
+                            className={cn(
+                              "h-5 w-5",
+                              systemAudioAvailable ? "text-jade-11" : "text-amber-11"
+                            )}
+                          />
+                          <div>
+                            <p
+                              className={cn(
+                                "text-sm font-medium",
+                                systemAudioAvailable ? "text-jade-12" : "text-amber-12"
+                              )}
+                            >
+                              {systemAudioAvailable ? "System audio ready" : "Permission required"}
+                            </p>
+                            <p className="text-xs text-slate-11">
+                              {systemAudioAvailable
+                                ? "Courier can record your system audio."
+                                : "Allow Screen & System Audio Recording in System Settings."}
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={onMicClick}
+                          disabled={!onMicClick}
+                        >
+                          Open System Settings
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </div>

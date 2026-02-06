@@ -624,9 +624,6 @@ function App() {
         isConnected={connectionStatus.connected}
         version={connectionStatus.version}
         permissionGranted={permissionGranted}
-        micStatus={recording.micStatus || (permissionGranted ? "active" : "not_granted")}
-        micTooltip={recording.micWarning}
-        onMicClick={() => window.system?.openMicSettings()}
         error={currentError}
         onSettingsClick={() => setSettingsOpen(true)}
         onHistoryClick={() => setSidebarOpen(!sidebarOpen)}
@@ -731,6 +728,10 @@ function App() {
         isSaving={settings.isSaving}
         error={settings.error}
         onSave={settings.saveSettings}
+        micStatus={recording.micStatus || (permissionGranted ? "active" : "not_granted")}
+        micTooltip={recording.micWarning}
+        onMicClick={() => window.system?.openMicSettings()}
+        systemAudioAvailable={permissionGranted}
       />
 
       {/* Model Download Modal */}

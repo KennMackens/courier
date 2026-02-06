@@ -1,16 +1,12 @@
-import { Settings, Wifi, WifiOff, AlertCircle, History, Mic, MicOff } from "lucide-react"
+import { Settings, Wifi, WifiOff, AlertCircle, History } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import type { MicStatus } from "@/hooks/useRecording"
 
 interface StatusBarProps {
   isConnected: boolean
   version?: string
   permissionGranted: boolean
   error?: string | null
-  micStatus: MicStatus
-  micTooltip?: string | null
-  onMicClick?: () => void
   onSettingsClick: () => void
   onHistoryClick: () => void
   className?: string
@@ -21,20 +17,10 @@ export function StatusBar({
   version,
   permissionGranted,
   error,
-  micStatus,
-  micTooltip,
-  onMicClick,
   onSettingsClick,
   onHistoryClick,
   className,
 }: StatusBarProps) {
-  const micActive = micStatus === "active"
-  const micIcon = micActive ? (
-    <Mic className="h-4 w-4 text-emerald-11" />
-  ) : (
-    <MicOff className="h-4 w-4 text-amber-11" />
-  )
-
   return (
     <div
       className={cn(
@@ -82,20 +68,6 @@ export function StatusBar({
 
       {/* Right side: History and Settings buttons */}
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onMicClick}
-          className={cn(
-            "flex items-center justify-center h-8 w-8 rounded-full border transition-colors",
-            micActive
-              ? "border-emerald-7 text-emerald-11 hover:bg-emerald-3"
-              : "border-amber-7 text-amber-11 hover:bg-amber-3"
-          )}
-          title={micTooltip || "Microphone status"}
-          aria-label={micTooltip || "Microphone status"}
-        >
-          {micIcon}
-        </button>
         <Button
           onClick={onHistoryClick}
           variant="ghost"
