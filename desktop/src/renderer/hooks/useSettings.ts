@@ -14,7 +14,7 @@ export interface Settings {
 const DEFAULT_SETTINGS: Settings = {
   language: "nl",
   whisperModel: "medium",
-  mlxModel: "mlx-community/Qwen2.5-3B-Instruct-4bit",
+  mlxModel: "mlx-community/Qwen2.5-3B-4bit",
   ollamaModel: "llama3",
   ollamaEndpoint: "http://localhost:11434",
   availableModels: ["tiny", "base", "small", "medium", "large-v3"],

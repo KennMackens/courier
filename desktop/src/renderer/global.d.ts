@@ -92,6 +92,7 @@ export interface ModelStatus {
 
 export interface DownloadProgress {
   status: string
+  modelId?: string
   progress?: number
   downloaded?: string
   total?: string

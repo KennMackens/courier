@@ -283,9 +283,14 @@ Courier uses MLX for local LLM inference on Apple Silicon. Models are downloaded
 
 ### Default Model
 
-- **Model:** `mlx-community/Qwen2.5-3B-Instruct-4bit` (~2GB)
-- **Why Qwen2.5:** Good multilingual support (especially Dutch), efficient 4-bit quantization, quality output for meeting notes
+- **Model:** `mlx-community/Qwen2.5-3B-4bit` (~2.8GB)
+- **Why Qwen2.5 3B:** Balanced quality/speed for note enhancement on Apple Silicon
 - **Storage:** `~/Library/Application Support/courier-desktop/models/`
+
+### Approved Models
+
+- `mlx-community/Qwen2.5-3B-4bit`
+- `pdelobelle/fietje-2-chat-mlx-6Bit`
 
 ### Model Download Flow
 

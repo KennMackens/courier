@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
-from huggingface_hub import snapshot_download, HfApi
+from huggingface_hub import snapshot_download
 from huggingface_hub.utils import (
     HfHubHTTPError,
     RepositoryNotFoundError,
@@ -508,30 +508,18 @@ class ModelManager:
         Returns:
             List of model info dicts with id, name, size, description
         """
-        # Curated list of recommended MLX models for meeting notes
-        return [
+        curated_models = [
             {
-                "id": "mlx-community/Llama-3.2-1B-Instruct-4bit",
-                "name": "Llama 3.2 1B Instruct (4-bit)",
-                "size_gb": 0.8,
-                "description": "Fast, efficient model good for basic note enhancement",
-            },
-            {
-                "id": "mlx-community/Llama-3.2-3B-Instruct-4bit",
-                "name": "Llama 3.2 3B Instruct (4-bit)",
-                "size_gb": 2.0,
-                "description": "Balanced performance and quality for note enhancement",
-            },
-            {
-                "id": "mlx-community/Phi-3.5-mini-instruct-4bit",
-                "name": "Phi-3.5 Mini Instruct (4-bit)",
-                "size_gb": 2.3,
-                "description": "Microsoft's efficient model, good reasoning capabilities",
-            },
-            {
-                "id": "mlx-community/Qwen2.5-3B-Instruct-4bit",
+                "id": "mlx-community/Qwen2.5-3B-4bit",
                 "name": "Qwen 2.5 3B Instruct (4-bit)",
-                "size_gb": 2.0,
-                "description": "Strong multilingual support including Dutch",
+                "size_gb": 2.8,
+                "description": "Balanced quality/speed for note enhancement on Apple Silicon",
+            },
+            {
+                "id": "pdelobelle/fietje-2-chat-mlx-6Bit",
+                "name": "Fietje-2 Chat (6-bit)",
+                "size_gb": 2.2,
+                "description": "Dutch-first model tuned for conversational summaries",
             },
         ]
+        return curated_models

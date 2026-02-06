@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from "react"
 import type { AvailableModel, DownloadedModel, DownloadProgress, ModelStatus } from "@/global"
 
-// Default model for note enhancement (Qwen 2.5 has good multilingual support)
-export const DEFAULT_MODEL_ID = "mlx-community/Qwen2.5-3B-Instruct-4bit"
+// Default model for note enhancement (Apple Silicon MLX)
+export const DEFAULT_MODEL_ID = "mlx-community/Qwen2.5-3B-4bit"
 
 export type DownloadState = "idle" | "downloading" | "complete" | "error" | "cancelled"
 
@@ -19,6 +19,7 @@ interface ModelManagerState {
   totalSize: string
   downloadSpeed: string
   downloadError: string | null
+  downloadModelId: string | null
 
   // Available models
   availableModels: AvailableModel[]
@@ -44,6 +45,7 @@ export function useModelManager(options: UseModelManagerOptions = {}) {
     totalSize: "",
     downloadSpeed: "",
     downloadError: null,
+    downloadModelId: null,
     availableModels: [],
     downloadedModels: [],
   })
@@ -103,24 +105,29 @@ export function useModelManager(options: UseModelManagerOptions = {}) {
 
       progressListenerRef.current = window.python.onDownloadProgress(
         (data: DownloadProgress) => {
+          const modelIdFromEvent = data.modelId || downloadModelId
           if (data.complete) {
             setState((prev) => ({
               ...prev,
               downloadState: "complete",
               downloadProgress: 100,
-              isModelReady: true,
+              isModelReady: modelIdFromEvent === modelId ? true : prev.isModelReady,
+              downloadModelId: modelIdFromEvent,
             }))
+            loadModels()
             onDownloadComplete?.()
           } else if (data.cancelled) {
             setState((prev) => ({
               ...prev,
               downloadState: "cancelled",
+              downloadModelId: modelIdFromEvent,
             }))
           } else if (data.status === "failed") {
             setState((prev) => ({
               ...prev,
               downloadState: "error",
               downloadError: "Download failed. Please check your internet connection.",
+              downloadModelId: modelIdFromEvent,
             }))
           } else {
             setState((prev) => ({
@@ -130,6 +137,7 @@ export function useModelManager(options: UseModelManagerOptions = {}) {
               downloadedSize: data.downloaded || "",
               totalSize: data.total || "",
               downloadSpeed: data.speed || "",
+              downloadModelId: modelIdFromEvent,
             }))
           }
         }
@@ -140,6 +148,7 @@ export function useModelManager(options: UseModelManagerOptions = {}) {
         downloadState: "downloading",
         downloadProgress: 0,
         downloadError: null,
+        downloadModelId: downloadModelId,
       }))
 
       try {
@@ -150,8 +159,10 @@ export function useModelManager(options: UseModelManagerOptions = {}) {
             ...prev,
             downloadState: "complete",
             downloadProgress: 100,
-            isModelReady: true,
+            isModelReady: downloadModelId === modelId ? true : prev.isModelReady,
+            downloadModelId: downloadModelId,
           }))
+          loadModels()
           onDownloadComplete?.()
         }
 
@@ -164,13 +175,14 @@ export function useModelManager(options: UseModelManagerOptions = {}) {
           ...prev,
           downloadState: "error",
           downloadError: errorMessage,
+          downloadModelId: downloadModelId,
         }))
 
         onDownloadError?.(errorMessage)
         throw error
       }
     },
-    [modelId, onDownloadComplete, onDownloadError]
+    [modelId, onDownloadComplete, onDownloadError, loadModels]
   )
 
   // Cancel download
@@ -180,6 +192,7 @@ export function useModelManager(options: UseModelManagerOptions = {}) {
       setState((prev) => ({
         ...prev,
         downloadState: "cancelled",
+        downloadModelId: null,
       }))
     } catch (error) {
       console.error("Failed to cancel download:", error)
@@ -223,6 +236,7 @@ export function useModelManager(options: UseModelManagerOptions = {}) {
       totalSize: "",
       downloadSpeed: "",
       downloadError: null,
+      downloadModelId: null,
     }))
   }, [])
 
@@ -244,6 +258,7 @@ export function useModelManager(options: UseModelManagerOptions = {}) {
     hasDownloadError: state.downloadState === "error",
     isDownloadComplete: state.downloadState === "complete",
     isDownloadCancelled: state.downloadState === "cancelled",
+    downloadingModelId: state.downloadModelId,
     checkModelStatus,
     downloadModel,
     cancelDownload,

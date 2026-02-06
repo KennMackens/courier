@@ -33,6 +33,10 @@ interface ModelDownloadModalProps {
   onDownload: () => void
   onCancel: () => void
   onRetry: () => void
+
+  // Optional model info
+  modelName?: string
+  modelSize?: string
 }
 
 export function ModelDownloadModal({
@@ -49,6 +53,8 @@ export function ModelDownloadModal({
   onDownload,
   onCancel,
   onRetry,
+  modelName,
+  modelSize,
 }: ModelDownloadModalProps) {
   // Determine current state
   const showInitialPrompt = !isDownloading && !isComplete && !error && !isCancelled
@@ -71,7 +77,7 @@ export function ModelDownloadModal({
           {showInitialPrompt && (
             <DialogDescription>
               To enhance your meeting notes locally, Courier needs to download an AI
-              model. This is a one-time download of approximately 2 GB.
+              model. This is a one-time download.
             </DialogDescription>
           )}
         </DialogHeader>
@@ -93,12 +99,13 @@ export function ModelDownloadModal({
 
               <div className="text-sm text-slate-11 space-y-1">
                 <p>
-                  <span className="font-medium">Model:</span> Qwen 2.5 3B (optimized for
-                  Apple Silicon)
+                  <span className="font-medium">Model:</span> {modelName || "Recommended MLX model"}
                 </p>
-                <p>
-                  <span className="font-medium">Size:</span> ~2 GB download
-                </p>
+                {modelSize && (
+                  <p>
+                    <span className="font-medium">Size:</span> {modelSize}
+                  </p>
+                )}
                 <p>
                   <span className="font-medium">Requirements:</span> macOS 14.2+, Apple
                   Silicon

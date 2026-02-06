@@ -250,6 +250,7 @@ function App() {
 
   // Model manager for MLX models
   const modelManager = useModelManager({
+    modelId: settings.settings.mlxModel,
     onDownloadComplete: () => {
       // Process pending enhancement if one exists
       if (pendingEnhancementRef.current) {
@@ -506,6 +507,13 @@ function App() {
       : null,
   }
 
+  const activeModelInfo = modelManager.availableModels.find(
+    (model) => model.id === settings.settings.mlxModel
+  )
+  const activeModelSizeLabel = activeModelInfo?.size_gb
+    ? `~${activeModelInfo.size_gb} GB`
+    : undefined
+
   // Initialize connection to Python
   useEffect(() => {
     async function init() {
@@ -737,6 +745,8 @@ function App() {
         isComplete={modelManager.isDownloadComplete}
         isCancelled={modelManager.isDownloadCancelled}
         error={modelManager.downloadError}
+        modelName={activeModelInfo?.name}
+        modelSize={activeModelSizeLabel}
         onDownload={() => modelManager.downloadModel()}
         onCancel={() => modelManager.cancelDownload()}
         onRetry={() => {

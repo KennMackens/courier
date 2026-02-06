@@ -21,8 +21,8 @@ def _debug(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
-# Default MLX model for note enhancement (good multilingual support)
-DEFAULT_MLX_MODEL = "mlx-community/Qwen2.5-3B-Instruct-4bit"
+# Default MLX model for note enhancement (macOS Apple Silicon)
+DEFAULT_MLX_MODEL = "mlx-community/Qwen2.5-3B-4bit"
 
 # Global lock to prevent concurrent MLX/Metal GPU operations
 # Metal can crash if multiple command encoders are active simultaneously
@@ -45,7 +45,7 @@ class MLXConfig:
 
     @staticmethod
     def default_model_path() -> str:
-        """Get default model path (Qwen2.5-3B for multilingual support)."""
+        """Get default model path (Qwen2.5 3B Instruct 4-bit)."""
         models_dir = MLXConfig.models_directory()
         # Convert HuggingFace model ID to directory name
         model_dir_name = DEFAULT_MLX_MODEL.replace("/", "--")

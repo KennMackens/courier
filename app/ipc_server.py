@@ -577,6 +577,7 @@ class IPCServer:
 
             self.writer.send_stream(request_id, {
                 "status": progress.status,
+                "modelId": model_id,
                 "progress": progress.percentage,
                 "downloaded": f"{downloaded_mb:.1f} MB",
                 "total": f"{total_mb:.1f} MB" if total_mb > 0 else "unknown",
@@ -587,6 +588,7 @@ class IPCServer:
             if progress.status == "completed":
                 self.writer.send_stream(request_id, {
                     "complete": True,
+                    "modelId": model_id,
                     "path": self._model_manager.get_model_path(model_id)
                 }, done=True)
             elif progress.status == "failed":
@@ -597,7 +599,8 @@ class IPCServer:
                 )
             elif progress.status == "cancelled":
                 self.writer.send_stream(request_id, {
-                    "cancelled": True
+                    "cancelled": True,
+                    "modelId": model_id,
                 }, done=True)
 
         # Start download in background (non-blocking)

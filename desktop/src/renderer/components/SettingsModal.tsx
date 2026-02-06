@@ -1,5 +1,5 @@
 import * as React from "react"
-import { RefreshCw, Download, Trash2, CheckCircle2, AlertCircle, ChevronDown, LogOut, User as UserIcon, Crown, Heart, HelpCircle, Bird } from "lucide-react"
+import { RefreshCw, Trash2, CheckCircle2, AlertCircle, ChevronDown, LogOut, User as UserIcon, Heart, HelpCircle, Bird } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -34,7 +34,7 @@ import {
   THEME_OPTIONS,
   RECORDING_THRESHOLD_OPTIONS,
 } from "@/hooks/useSettings"
-import { useModelManager, DEFAULT_MODEL_ID } from "@/hooks/useModelManager"
+import { useModelManager } from "@/hooks/useModelManager"
 import { useAuth } from "@/contexts/AuthContext"
 import { applyTheme } from "@/lib/theme"
 import { cn } from "@/lib/utils"
@@ -125,6 +125,17 @@ export function SettingsModal({
 
   // Model manager for MLX models
   const modelManager = useModelManager()
+  const downloadedModelIds = React.useMemo(
+    () => new Set(modelManager.downloadedModels.map((model) => model.modelId)),
+    [modelManager.downloadedModels]
+  )
+  const availableModelNames = React.useMemo(() => {
+    const map = new Map<string, string>()
+    modelManager.availableModels.forEach((model) => {
+      map.set(model.id, model.name)
+    })
+    return map
+  }, [modelManager.availableModels])
 
   // Ollama models state (deprecated, kept for advanced users)
   const [ollamaModels, setOllamaModels] = React.useState<string[]>([])
@@ -398,104 +409,53 @@ export function SettingsModal({
                   aria-labelledby="settings-tab-enhancement"
                 >
                   <div className="space-y-5">
-                    {/* Model Selection */}
-                    <div className="space-y-2">
-                      <Label htmlFor="mlxModel">MLX Model</Label>
-                      <Select
-                        value={formState.mlxModel}
-                        onValueChange={(value) => updateField("mlxModel", value)}
-                        disabled={modelManager.downloadedModels.length === 0}
-                      >
-                        <SelectTrigger id="mlxModel">
-                          <SelectValue
-                            placeholder={
-                              modelManager.downloadedModels.length === 0
-                                ? "No models downloaded"
-                                : "Select model"
-                            }
-                          />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {modelManager.downloadedModels.length > 0 ? (
-                            modelManager.downloadedModels.map((model) => (
-                              <SelectItem key={model.modelId} value={model.modelId}>
-                                <div className="flex flex-col">
-                                  <span>{model.modelId.split("/").pop()}</span>
-                                  <span className="text-xs text-slate-9">
-                                    {model.size}
-                                  </span>
-                                </div>
-                              </SelectItem>
-                            ))
-                          ) : (
-                            <SelectItem value="none" disabled>
-                              No models downloaded
-                            </SelectItem>
-                          )}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-slate-10">
-                        Choose a downloaded model for note enhancement.
-                      </p>
-                    </div>
-
                     {/* Model Status */}
                     <div className="space-y-3">
-                      <div className="flex items-center justify-between p-3 rounded-lg bg-slate-2 border border-slate-6">
-                        <div className="flex items-center gap-3">
-                          {modelManager.isChecking ? (
-                            <Spinner size="sm" />
-                          ) : modelManager.downloadedModels.length > 0 ? (
-                            <CheckCircle2 className="h-5 w-5 text-jade-11" />
-                          ) : (
-                            <AlertCircle className="h-5 w-5 text-amber-11" />
-                          )}
-                          <div>
-                            <p className="text-sm font-medium text-slate-12">
-                              {modelManager.downloadedModels.length > 0
-                                ? `${modelManager.downloadedModels.length} model${modelManager.downloadedModels.length > 1 ? "s" : ""} available`
-                                : "No Models Downloaded"}
-                            </p>
-                            <p className="text-xs text-slate-10">
-                              {modelManager.downloadedModels.length > 0
-                                ? "Select a model above for note enhancement"
-                                : "Download a model to enable note enhancement"}
-                            </p>
-                          </div>
-                        </div>
-
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => modelManager.downloadModel(DEFAULT_MODEL_ID)}
-                          disabled={modelManager.isDownloading}
-                        >
-                          <Download className="h-4 w-4 mr-2" />
-                          Add Model
-                        </Button>
-                      </div>
-
                       {/* Downloaded Models List with Delete */}
                       <div className="space-y-2">
-                        <p className="text-xs text-slate-10">Manage downloaded models:</p>
+                        <p className="text-xs text-slate-10">
+                          Select a model to make it active:
+                        </p>
                         {modelManager.downloadedModels.length > 0 ? (
                           modelManager.downloadedModels.map((model) => (
                             <div
                               key={model.modelId}
-                              className="flex items-center justify-between p-2 rounded bg-slate-2 border border-slate-5"
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => updateField("mlxModel", model.modelId)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault()
+                                  updateField("mlxModel", model.modelId)
+                                }
+                              }}
+                              className={cn(
+                                "flex items-center justify-between p-2 rounded border transition-colors",
+                                "bg-slate-2 border-slate-5 hover:border-slate-7 cursor-pointer",
+                                formState.mlxModel === model.modelId && "border-jade-7 bg-jade-2/40"
+                              )}
                             >
                               <div className="flex-1 min-w-0">
                                 <p className="text-xs font-medium text-slate-11 truncate">
-                                  {model.modelId.split("/").pop()}
+                                  {availableModelNames.get(model.modelId) ||
+                                    model.modelId.split("/").pop()}
                                 </p>
                                 <p className="text-xs text-slate-9">{model.size}</p>
                               </div>
+                              {formState.mlxModel === model.modelId && (
+                                <div className="flex items-center gap-1 text-xs text-jade-11 font-medium">
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  Active
+                                </div>
+                              )}
                               <Button
                                 type="button"
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => modelManager.deleteModel(model.modelId)}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  modelManager.deleteModel(model.modelId)
+                                }}
                                 className="text-red-11 hover:text-red-12 hover:bg-red-3 ml-2"
                               >
                                 <Trash2 className="h-3 w-3" />
@@ -505,6 +465,47 @@ export function SettingsModal({
                         ) : (
                           <div className="text-xs text-slate-10">
                             No downloaded models yet.
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Available Models */}
+                      <div className="space-y-2">
+                        <p className="text-xs text-slate-10">Available models:</p>
+                        {modelManager.availableModels.length > 0 ? (
+                          modelManager.availableModels.map((model) => {
+                            const isInstalled = downloadedModelIds.has(model.id)
+                            const isDownloading = modelManager.isDownloading && modelManager.downloadingModelId === model.id
+                            const sizeLabel = model.size_gb ? `~${model.size_gb} GB` : "Size unknown"
+                            return (
+                              <div
+                                key={model.id}
+                                className="flex items-center justify-between gap-3 p-2 rounded bg-slate-2 border border-slate-5"
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-medium text-slate-11 truncate">
+                                    {model.name}
+                                  </p>
+                                  <p className="text-xs text-slate-9 truncate">
+                                    {model.description}
+                                  </p>
+                                  <p className="text-[11px] text-slate-8">{sizeLabel}</p>
+                                </div>
+                                <Button
+                                  type="button"
+                                  variant={isInstalled ? "outline" : "default"}
+                                  size="sm"
+                                  onClick={() => modelManager.downloadModel(model.id)}
+                                  disabled={isInstalled || modelManager.isDownloading}
+                                >
+                                  {isInstalled ? "Installed" : isDownloading ? "Downloading" : "Install"}
+                                </Button>
+                              </div>
+                            )
+                          })
+                        ) : (
+                          <div className="text-xs text-slate-10">
+                            No available models found.
                           </div>
                         )}
                       </div>
