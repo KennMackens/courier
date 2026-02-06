@@ -9,10 +9,16 @@ import subprocess
 import threading
 import struct
 import json
+import sys
 import numpy as np
 from pathlib import Path
 from typing import Optional, Callable, List
 from dataclasses import dataclass
+
+
+def _debug(msg: str) -> None:
+    """Print debug message to stderr to avoid corrupting IPC stdout."""
+    print(msg, file=sys.stderr, flush=True)
 
 
 @dataclass
@@ -142,7 +148,7 @@ class CoreAudioTapRecorder:
             audio = self._resample(audio, self._actual_sample_rate, self._config.sample_rate)
 
         duration = len(audio) / self._config.sample_rate
-        print(f"Captured {duration:.1f} seconds of system audio")
+        _debug(f"Captured {duration:.1f} seconds of system audio")
 
         return audio
 
@@ -230,7 +236,7 @@ class CoreAudioTapRecorder:
             # Non-fatal warning (e.g., microphone unavailable)
             warning_code = msg.get("code", "UNKNOWN")
             warning_message = msg.get("message", "Unknown warning")
-            print(f"[Courier] Warning ({warning_code}): {warning_message}")
+            _debug(f"[Courier] Warning ({warning_code}): {warning_message}")
             # Don't set stop_event - recording continues
             if self._on_warning:
                 self._on_warning(warning_message)

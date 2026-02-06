@@ -27,8 +27,11 @@ export function useNotesEnhancement(options: UseNotesEnhancementOptions = {}) {
 
   // Setup token listener
   useEffect(() => {
-    const unsubscribe = window.python.onEnhanceToken((data: { token: string }) => {
+    const unsubscribe = window.python.onEnhanceToken((data: { token?: string; status?: string }) => {
       const { token } = data
+      // Only process if token is present (status messages don't have tokens)
+      if (!token) return
+
       onToken?.(token)
 
       // Accumulate tokens

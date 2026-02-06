@@ -1,0 +1,4 @@
+interface:
+  display_name: "Linear Idea Capture"
+  short_description: "Capture a new idea into a Linear ticket"
+  default_prompt: "Capture a feature idea through guided questions and create a draft Linear ticket."

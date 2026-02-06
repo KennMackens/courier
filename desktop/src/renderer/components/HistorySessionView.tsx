@@ -136,7 +136,7 @@ export function HistorySessionView({
       <h3 className="text-base font-semibold text-foreground mb-2 mt-4">{children}</h3>
     ),
     p: ({ children }: { children?: React.ReactNode }) => (
-      <p className="text-sm text-slate-12 mb-3 leading-relaxed">{children}</p>
+      <p className="text-sm text-slate-12 mb-3 leading-7">{children}</p>
     ),
     ul: ({ children }: { children?: React.ReactNode }) => (
       <ul className="list-disc list-outside ml-5 mb-3 space-y-1">{children}</ul>
@@ -145,7 +145,7 @@ export function HistorySessionView({
       <ol className="list-decimal list-outside ml-5 mb-3 space-y-1">{children}</ol>
     ),
     li: ({ children }: { children?: React.ReactNode }) => (
-      <li className="text-sm text-slate-12">{children}</li>
+      <li className="text-sm text-slate-12 leading-7">{children}</li>
     ),
     strong: ({ children }: { children?: React.ReactNode }) => (
       <strong className="font-semibold text-foreground">{children}</strong>
@@ -396,31 +396,19 @@ export function HistorySessionView({
 
             {isEditing ? (
               /* Edit mode - full markdown source in textarea */
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-1 min-h-[70vh]">
                 <textarea
                   ref={textareaRef}
                   value={currentNotes}
                   onChange={handleNotesChange}
                   placeholder="Write your notes in Markdown..."
-                  rows={Math.max(15, currentNotes.split("\n").length + 2)}
+                  rows={20}
                   className={cn(
-                    "w-full resize-none bg-slate-2 text-slate-12 rounded-md p-4",
-                    "placeholder:text-slate-9 text-sm font-mono",
-                    "border border-slate-6 outline-none focus:outline-none focus:ring-2 focus:ring-jade-7"
+                    "w-full h-full min-h-full resize-none bg-transparent border-0 text-slate-12",
+                    "placeholder:text-slate-9 text-base leading-7",
+                    "outline-none focus-visible:outline-none focus-visible:ring-0"
                   )}
                 />
-                <div className="flex justify-end">
-                  <Button variant="default" size="sm" onClick={handleSave} disabled={isSaving}>
-                    {isSaving ? (
-                      <>
-                        <Spinner size="sm" className="mr-2" />
-                        Saving...
-                      </>
-                    ) : (
-                      "Done"
-                    )}
-                  </Button>
-                </div>
               </div>
             ) : (
               /* View mode - rendered markdown */
@@ -459,30 +447,45 @@ export function HistorySessionView({
       </div>
 
       {/* Floating controls at bottom-center */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 z-10">
-        {/* Recording state indicator */}
-        {isRecording && (
-          <div className="flex items-center gap-2 text-sm text-slate-11 bg-background/80 backdrop-blur-sm px-3 py-1.5 rounded-full">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-9 opacity-75" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-9" />
-            </span>
-            <span className="font-mono text-xs">{formatDuration(recordingDuration)}</span>
-          </div>
-        )}
+      {(isRecording || isEditing || (onReturnToActiveSession && !isEditing)) && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 z-10">
+          {/* Recording state indicator */}
+          {isRecording && (
+            <div className="flex items-center gap-2 text-sm text-slate-11 bg-background/80 backdrop-blur-sm px-3 py-1.5 rounded-full">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-9 opacity-75" />
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-9" />
+              </span>
+              <span className="font-mono text-xs">{formatDuration(recordingDuration)}</span>
+            </div>
+          )}
 
-        {/* Return to active session button */}
-        {onReturnToActiveSession && (
-          <Button
-            onClick={onReturnToActiveSession}
-            variant="default"
-            size="default"
-          >
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Return to Active Session
-          </Button>
-        )}
-      </div>
+          {isEditing && (
+            <Button variant="default" size="default" onClick={handleSave} disabled={isSaving}>
+              {isSaving ? (
+                <>
+                  <Spinner size="sm" className="mr-2" />
+                  Saving...
+                </>
+              ) : (
+                "Done"
+              )}
+            </Button>
+          )}
+
+          {/* Return to active session button */}
+          {onReturnToActiveSession && !isEditing && (
+            <Button
+              onClick={onReturnToActiveSession}
+              variant="default"
+              size="default"
+            >
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Return to Active Session
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* Delete confirmation dialog */}
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>

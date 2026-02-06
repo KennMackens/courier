@@ -62,6 +62,43 @@ export interface MeetingListOptions {
   search?: string
 }
 
+// Model management types
+export interface AvailableModel {
+  id: string
+  name: string
+  size_gb: number
+  description: string
+}
+
+export interface DownloadedModel {
+  modelId: string
+  path: string
+  size: string
+  sizeBytes: number
+  downloadDate: string | null
+}
+
+export interface ModelStatus {
+  exists: boolean
+  modelId: string
+  path?: string
+  size?: string
+  sizeBytes?: number
+  downloadDate?: string | null
+  version?: string | null
+}
+
+export interface DownloadProgress {
+  status: string
+  progress?: number
+  downloaded?: string
+  total?: string
+  speed?: string
+  complete?: boolean
+  cancelled?: boolean
+  path?: string
+}
+
 // API types
 export interface PythonAPI {
   // Initialization
@@ -77,6 +114,7 @@ export interface PythonAPI {
   startRecording: (params?: { sampleRate?: number }) => Promise<{
     started: boolean
     actualSampleRate: number
+    microphoneActive: boolean
   }>
   stopRecording: () => Promise<{
     stopped: boolean
@@ -108,11 +146,27 @@ export interface PythonAPI {
   // Session
   resetSession: () => Promise<{ ok: boolean }>
 
+  // Model management
+  downloadModel: (params: { modelId: string }) => Promise<{ complete?: boolean; alreadyDownloaded?: boolean; path?: string }>
+  cancelDownload: () => Promise<{ cancelled: boolean }>
+  isModelDownloaded: (params: { modelId: string }) => Promise<{ downloaded: boolean }>
+  getModelStatus: (params: { modelId: string }) => Promise<ModelStatus>
+  deleteModel: (params: { modelId: string }) => Promise<{ deleted: boolean }>
+  getAvailableModels: () => Promise<{ models: AvailableModel[] }>
+  getDownloadedModels: () => Promise<{ models: DownloadedModel[] }>
+
   // Event listeners
   onTranscribeProgress: (callback: (data: { status?: string; progress?: number }) => void) => () => void
   onEnhanceToken: (callback: (data: { token?: string; status?: string }) => void) => () => void
   onRecordingError: (callback: (data: { message: string }) => void) => () => void
+  onRecordingWarning: (callback: (data: { message: string }) => void) => () => void
   onError: (callback: (error: { message: string }) => void) => () => void
+  onDownloadProgress: (callback: (data: DownloadProgress) => void) => () => void
+}
+
+// System API
+export interface SystemAPI {
+  openMicSettings: () => Promise<{ ok: boolean }>
 }
 
 // Expose the API to the renderer
@@ -141,6 +195,15 @@ const pythonAPI: PythonAPI = {
   // Session
   resetSession: () => ipcRenderer.invoke('python:resetSession'),
 
+  // Model management
+  downloadModel: (params) => ipcRenderer.invoke('python:downloadModel', params),
+  cancelDownload: () => ipcRenderer.invoke('python:cancelDownload'),
+  isModelDownloaded: (params) => ipcRenderer.invoke('python:isModelDownloaded', params),
+  getModelStatus: (params) => ipcRenderer.invoke('python:getModelStatus', params),
+  deleteModel: (params) => ipcRenderer.invoke('python:deleteModel', params),
+  getAvailableModels: () => ipcRenderer.invoke('python:getAvailableModels'),
+  getDownloadedModels: () => ipcRenderer.invoke('python:getDownloadedModels'),
+
   // Event listeners - return unsubscribe function
   onTranscribeProgress: (callback) => {
     const handler = (_: Electron.IpcRendererEvent, data: { status?: string; progress?: number }) => callback(data)
@@ -160,11 +223,27 @@ const pythonAPI: PythonAPI = {
     return () => ipcRenderer.removeListener('python:recordingError', handler)
   },
 
+  onRecordingWarning: (callback) => {
+    const handler = (_: Electron.IpcRendererEvent, data: { message: string }) => callback(data)
+    ipcRenderer.on('python:recordingWarning', handler)
+    return () => ipcRenderer.removeListener('python:recordingWarning', handler)
+  },
+
   onError: (callback) => {
     const handler = (_: Electron.IpcRendererEvent, error: { message: string }) => callback(error)
     ipcRenderer.on('python:error', handler)
     return () => ipcRenderer.removeListener('python:error', handler)
   },
+
+  onDownloadProgress: (callback) => {
+    const handler = (_: Electron.IpcRendererEvent, data: DownloadProgress) => callback(data)
+    ipcRenderer.on('python:downloadModel:progress', handler)
+    return () => ipcRenderer.removeListener('python:downloadModel:progress', handler)
+  },
+}
+
+const systemAPI: SystemAPI = {
+  openMicSettings: () => ipcRenderer.invoke('system:openMicSettings'),
 }
 
 // Database API
@@ -236,11 +315,13 @@ const databaseAPI: DatabaseAPI = {
 // Expose to renderer
 contextBridge.exposeInMainWorld('python', pythonAPI)
 contextBridge.exposeInMainWorld('database', databaseAPI)
+contextBridge.exposeInMainWorld('system', systemAPI)
 
 // Type declaration for renderer
 declare global {
   interface Window {
     python: PythonAPI
     database: DatabaseAPI
+    system: SystemAPI
   }
 }

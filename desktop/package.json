@@ -20,7 +20,10 @@
     "rebuild": "npx @electron/rebuild -f -w better-sqlite3"
   },
   "dependencies": {
+    "@radix-ui/react-collapsible": "^1.1.12",
+    "@radix-ui/react-progress": "^1.1.8",
     "better-sqlite3": "^12.6.2",
+    "firebase": "^12.8.0",
     "react-markdown": "^10.1.0",
     "uuid": "^9.0.0"
   },

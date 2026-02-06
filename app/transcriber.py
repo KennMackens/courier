@@ -4,12 +4,18 @@ Transcription module using faster-whisper.
 Simple batch transcription - transcribes complete audio after recording.
 """
 
+import sys
 import threading
 import numpy as np
 from typing import Optional, Callable
 from dataclasses import dataclass
 
 from faster_whisper import WhisperModel
+
+
+def _debug(msg: str) -> None:
+    """Print debug message to stderr to avoid corrupting IPC stdout."""
+    print(msg, file=sys.stderr, flush=True)
 
 
 # Available Whisper models (larger = better quality, slower)
@@ -61,8 +67,8 @@ class Transcriber:
             return  # Already loaded
 
         device, compute_type = get_compute_device()
-        print(f"Loading Whisper model '{self.config.model_size}' on {device} ({compute_type})...")
-        print(f"Language: {self.config.language}")
+        _debug(f"Loading Whisper model '{self.config.model_size}' on {device} ({compute_type})...")
+        _debug(f"Language: {self.config.language}")
 
         self._model = WhisperModel(
             self.config.model_size,
@@ -70,7 +76,7 @@ class Transcriber:
             compute_type=compute_type
         )
         self._model_loaded_for = self.config.model_size
-        print("Model loaded successfully.")
+        _debug("Model loaded successfully.")
 
     def transcribe(self, audio: np.ndarray) -> str:
         """
@@ -95,7 +101,7 @@ class Transcriber:
         if max_val > 1.0:
             audio = audio / max_val
 
-        print(f"Transcribing {len(audio) / 16000:.1f} seconds of audio...")
+        _debug(f"Transcribing {len(audio) / 16000:.1f} seconds of audio...")
 
         segments, info = self._model.transcribe(
             audio,
@@ -113,7 +119,7 @@ class Transcriber:
                 texts.append(text)
 
         result = " ".join(texts)
-        print(f"Transcription complete: {len(result)} characters")
+        _debug(f"Transcription complete: {len(result)} characters")
 
         return result
 
@@ -136,7 +142,7 @@ class Transcriber:
                 result = self.transcribe(audio)
                 on_complete(result)
             except Exception as e:
-                print(f"Transcription error: {e}")
+                _debug(f"Transcription error: {e}")
                 if on_error:
                     on_error(str(e))
 

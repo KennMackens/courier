@@ -13,7 +13,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
           // Base styles
           "flex h-10 w-full rounded-md px-3 py-2 text-sm",
           // Border: hairline with subtle color
-          "border border-slate-6",
+          "border border-slate-6 text-slate-12",
           // Background
           "bg-background",
           // Placeholder

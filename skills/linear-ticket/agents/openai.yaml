@@ -1,0 +1,4 @@
+interface:
+  display_name: "Linear Ticket Developer"
+  short_description: "Develop Linear tickets into dev-ready specs"
+  default_prompt: "Turn a Linear ticket into a development-ready specification through collaborative refinement."

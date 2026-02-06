@@ -1,8 +1,9 @@
 import { useRef, useCallback } from "react"
-import { Mic, Square } from "lucide-react"
+import { Mic, MicOff, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
+import type { MicStatus } from "@/hooks/useRecording"
 
 interface NotesEditorProps {
   notes: string
@@ -17,6 +18,8 @@ interface NotesEditorProps {
   hasTranscript: boolean
   onStartRecording: () => void
   onStopRecording: () => void
+  micStatus: MicStatus
+  micWarning?: string | null
 }
 
 function formatDuration(seconds: number): string {
@@ -37,6 +40,8 @@ export function NotesEditor({
   hasTranscript,
   onStartRecording,
   onStopRecording,
+  micStatus,
+  micWarning,
 }: NotesEditorProps) {
   const bodyRef = useRef<HTMLTextAreaElement>(null)
 
@@ -71,6 +76,13 @@ export function NotesEditor({
     },
     [title, onNotesChange]
   )
+
+  const micIcon =
+    micStatus === "active" ? (
+      <Mic className="h-4 w-4 text-emerald-11" />
+    ) : (
+      <MicOff className="h-4 w-4 text-amber-11" />
+    )
 
   return (
     <div className={cn("relative flex-1 min-h-0 flex flex-col", className)}>
@@ -110,13 +122,28 @@ export function NotesEditor({
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 z-10">
         {/* Recording state indicator */}
         {isRecording && (
-          <div className="flex items-center gap-2 text-sm text-slate-11 bg-background/80 backdrop-blur-sm px-3 py-1.5 rounded-full">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-9 opacity-75" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-9" />
-            </span>
-            <span className="font-mono text-xs">{formatDuration(duration)}</span>
-          </div>
+          <>
+            <div className="flex items-center gap-2 text-sm text-slate-11 bg-background/80 backdrop-blur-sm px-3 py-1.5 rounded-full">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-9 opacity-75" />
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-9" />
+              </span>
+              <span className="font-mono text-xs">{formatDuration(duration)}</span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => window.system?.openMicSettings()}
+              className={cn(
+                "flex items-center justify-center h-9 w-9 rounded-full border bg-background/80 backdrop-blur-sm",
+                micStatus === "active" ? "border-emerald-7 text-emerald-11" : "border-amber-7 text-amber-11"
+              )}
+              title={micWarning || "Microphone status"}
+              aria-label={micWarning || "Microphone status"}
+            >
+              {micIcon}
+            </button>
+          </>
         )}
 
         {/* Transcribing indicator */}

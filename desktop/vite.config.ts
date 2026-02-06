@@ -7,6 +7,7 @@ export default defineConfig({
   plugins: [react()],
   root: 'src/renderer',
   base: './',
+  envDir: resolve(__dirname), // Look for .env files in desktop/ directory
   build: {
     outDir: '../../dist/renderer',
     emptyOutDir: true,

@@ -3,19 +3,23 @@ import { useState, useCallback, useEffect } from "react"
 export interface Settings {
   language: string
   whisperModel: string
+  mlxModel: string
   ollamaModel: string
   ollamaEndpoint: string
   availableModels: string[]
   theme: "light" | "dark" | "system"
+  recordingThreshold: number // Minimum recording duration in seconds
 }
 
 const DEFAULT_SETTINGS: Settings = {
   language: "nl",
   whisperModel: "medium",
+  mlxModel: "mlx-community/Qwen2.5-3B-Instruct-4bit",
   ollamaModel: "llama3",
   ollamaEndpoint: "http://localhost:11434",
   availableModels: ["tiny", "base", "small", "medium", "large-v3"],
   theme: "system",
+  recordingThreshold: 30, // Default 30 seconds
 }
 
 interface UseSettingsOptions {
@@ -112,8 +116,10 @@ export function useSettings(options: UseSettingsOptions = {}) {
       await window.python.setSettings({
         language: DEFAULT_SETTINGS.language,
         whisperModel: DEFAULT_SETTINGS.whisperModel,
+        mlxModel: DEFAULT_SETTINGS.mlxModel,
         ollamaModel: DEFAULT_SETTINGS.ollamaModel,
         ollamaEndpoint: DEFAULT_SETTINGS.ollamaEndpoint,
+        recordingThreshold: DEFAULT_SETTINGS.recordingThreshold,
       })
 
       localStorage.setItem("courier-theme", DEFAULT_SETTINGS.theme)
@@ -165,4 +171,13 @@ export const THEME_OPTIONS = [
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
   { value: "system", label: "System" },
+] as const
+
+// Recording threshold options (in seconds)
+export const RECORDING_THRESHOLD_OPTIONS = [
+  { value: 0, label: "Disabled" },
+  { value: 10, label: "10 seconds" },
+  { value: 30, label: "30 seconds" },
+  { value: 60, label: "1 minute" },
+  { value: 120, label: "2 minutes" },
 ] as const

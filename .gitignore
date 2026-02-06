@@ -30,3 +30,4 @@ courier-audio-helper/Package.resolved
 
 # Claude
 .claude/
+.aider*

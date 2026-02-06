@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Courier is a local-first macOS meeting recorder built with Electron + React + Python + Swift. It captures system audio and microphone using native Core Audio Taps, transcribes using local Whisper models, and generates enhanced meeting notes via Ollama LLMs. All processing happens locally - no cloud dependencies. Requires macOS 14.2+.
+Courier is a local-first macOS meeting recorder built with Electron + React + Python + Swift. It captures system audio and microphone using native Core Audio Taps, transcribes using local Whisper models, and generates enhanced meeting notes via local LLMs (Ollama or MLX). All processing happens locally - no cloud dependencies. Requires macOS 14.2+.
 
 ## Running the Application
 
@@ -26,7 +26,7 @@ cd desktop && npm run dev
 
 # First run: Grant "Screen & System Audio Recording" and "Microphone" permissions when prompted
 
-# Ollama must be running for note generation
+# For Ollama LLM integration (optional - can also use MLX):
 ollama serve  # In separate terminal
 ```
 
@@ -98,7 +98,9 @@ graph TB
         IPC["ipc_server.py<br/>(JSON-RPC Server)"]
         Recorder["recorder.py"]
         Transcriber["transcriber.py"]
-        Ollama["ollama.py"]
+        ModelMgr["model_manager.py"]
+        MLX["mlx_inference.py"]
+        Ollama["ollama.py (fallback)"]
     end
 
     subgraph Swift["Swift Helper"]
@@ -111,7 +113,9 @@ graph TB
     Main <-->|"JSON-RPC<br/>(stdin/stdout)"| IPC
     IPC --> Recorder
     IPC --> Transcriber
-    IPC --> Ollama
+    IPC --> ModelMgr
+    IPC --> MLX
+    IPC -.-> Ollama
     Recorder <-->|"JSON control<br/>(stdin/stdout)"| IPCHandler
     IPCHandler -.->|"Binary PCM audio<br/>(stderr)"| Recorder
     IPCHandler --> AudioCapture
@@ -141,7 +145,7 @@ graph LR
 
     subgraph Output["Output"]
         Transcript["Transcript Text"]
-        Enhanced["Enhanced Notes<br/>(via Ollama)"]
+        Enhanced["Enhanced Notes<br/>(via MLX)"]
     end
 
     System --> Mixer
@@ -164,7 +168,7 @@ sequenceDiagram
     participant Main as Main Process
     participant Python as Python Backend
     participant Swift as Swift Helper
-    participant Ollama as Ollama LLM
+    participant MLX as MLX LLM (Local)
 
     User->>Renderer: Click "Start Recording"
     Renderer->>Main: startRecording()
@@ -193,8 +197,8 @@ sequenceDiagram
     User->>Renderer: Click "End Meeting"
     Renderer->>Main: enhanceNotes()
     Main->>Python: JSON-RPC: enhance_notes
-    Python->>Ollama: Stream prompt + notes + transcript
-    Ollama-->>Python: Streaming tokens
+    Python->>MLX: Load model + stream inference
+    MLX-->>Python: Streaming tokens
     Python-->>Main: Streaming enhanced notes
     Main-->>Renderer: Update enhanced notes display
 ```
@@ -221,7 +225,9 @@ sequenceDiagram
 - `ipc_protocol.py` - IPC message parsing and serialization
 - `recorder.py` - CoreAudioTapRecorder: manages Swift helper subprocess, audio buffering
 - `transcriber.py` - Faster-Whisper transcription pipeline
-- `ollama.py` - LLM integration for note enhancement
+- `model_manager.py` - HuggingFace model downloads and local model management
+- `mlx_inference.py` - Local LLM inference using Apple MLX framework (primary)
+- `ollama.py` - LLM integration for note enhancement (fallback, deprecated)
 
 ### Swift Helper (`courier-audio-helper/`)
 
@@ -244,7 +250,7 @@ sequenceDiagram
 - **JSON-RPC for Electron ↔ Python:** Typed request/response protocol via stdin/stdout
 - **Binary audio streaming:** Size-prefixed PCM float32 over stderr (Python ↔ Swift)
 - **Callback pattern:** Functions accept `on_error`, `on_complete`, `on_progress` callbacks
-- **Config dataclasses:** AudioConfig, TranscriberConfig, OllamaConfig for typed configuration
+- **Config dataclasses:** AudioConfig, TranscriberConfig, OllamaConfig, MLXConfig for typed configuration
 - **Lazy model loading:** Whisper models loaded on first transcription, then cached
 - **Graceful degradation:** If microphone unavailable, recording continues with system audio only
 
@@ -265,6 +271,61 @@ The Electron app uses a comprehensive design system based on Radix colors:
 - **Whisper models:** tiny, base, small, medium (default), large-v3
 - **Compute detection:** CUDA → MPS → CPU with int8 quantization
 - **Default language:** Dutch (nl), supports EN, DE, FR, ES, IT, PT
-- **Ollama endpoint:** http://localhost:11434
+- **LLM integration:**
+  - **MLX (local, default):** Apple Silicon local inference via `mlx-lm` - models stored in `~/Library/Application Support/courier-desktop/models/`
+  - **Ollama (remote, fallback):** http://localhost:11434 - deprecated, available in Settings under "Advanced"
 - **Audio format:** 16kHz mono float32 required for Whisper
 - **Build:** `build_helper.sh` creates universal binary (ARM64 + x86_64)
+
+## MLX Model Management
+
+Courier uses MLX for local LLM inference on Apple Silicon. Models are downloaded from HuggingFace and stored locally.
+
+### Default Model
+
+- **Model:** `mlx-community/Qwen2.5-3B-Instruct-4bit` (~2GB)
+- **Why Qwen2.5:** Good multilingual support (especially Dutch), efficient 4-bit quantization, quality output for meeting notes
+- **Storage:** `~/Library/Application Support/courier-desktop/models/`
+
+### Model Download Flow
+
+1. On first "End Meeting" click, if no model is downloaded, a download modal appears
+2. User can download the model (~2GB) with progress tracking
+3. Download can be cancelled; partial downloads are cleaned up
+4. Once downloaded, the model is cached locally for future sessions
+5. Model status and deletion available in Settings
+
+### Key Files
+
+- `app/model_manager.py` - ModelManager class handles:
+  - `download_model()` - Download from HuggingFace with progress callbacks
+  - `cancel_download()` - Cancel in-progress download
+  - `is_model_downloaded()` - Check if model exists locally
+  - `get_model_path()` - Get local path for model
+  - `delete_model()` - Remove model from disk
+  - `get_available_models()` - List recommended MLX models
+  - `get_downloaded_models()` - List locally cached models
+
+- `app/mlx_inference.py` - MLXNotesGenerator class handles:
+  - Model loading via `mlx_lm`
+  - Chat template formatting for instruct models
+  - Streaming token generation
+  - Configurable temperature, top_p, max_tokens
+
+### IPC Handlers for Model Management
+
+```
+downloadModel       - Start model download with progress streaming
+cancelDownload      - Cancel in-progress download
+isModelDownloaded   - Check if model exists
+getModelStatus      - Get model info (path, size)
+deleteModel         - Remove model from disk
+getAvailableModels  - List recommended models
+getDownloadedModels - List cached models
+```
+
+### Frontend Components
+
+- `useModelManager` hook - React state management for model download/status
+- `ModelDownloadModal` - First-use download prompt with progress
+- `SettingsModal` - Model status display, download/delete buttons

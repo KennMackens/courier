@@ -14,6 +14,7 @@ from dataclasses import dataclass
 @dataclass
 class OllamaConfig:
     """Configuration for Ollama."""
+
     base_url: str = "http://localhost:11434"
     model: str = "llama3.2"  # Default model, user can change
     timeout: int = 120  # Seconds
@@ -44,29 +45,46 @@ MEETING TRANSCRIPT (may contain errors):
 
 ENHANCED MEETING NOTES:"""
 
-ENHANCE_PROMPT_NL = """Je bent een assistent voor vergadernotities. De gebruiker heeft korte aantekeningen gemaakt tijdens een vergadering, en je hebt toegang tot het vergadertranscript (dat mogelijk onvolmaakt is door automatische transcriptie).
+ENHANCE_PROMPT_NL = """Je bent een professionele assistent voor het uitwerken van vergadernotities.
 
-Je taak is om de aantekeningen van de gebruiker te VERBETEREN door:
-1. Te beginnen met een beknopte vergadertitel op de eerste regel (formaat: # Titel Hier)
-2. Opsommingstekens uit te breiden met relevante details uit het transcript
-3. Belangrijke punten toe te voegen die de gebruiker mogelijk heeft gemist
-4. Namen, nummers, data of specifieke details uit het transcript in te vullen
-5. De notities in duidelijke secties te organiseren
-6. De oorspronkelijke structuur en intentie van de gebruiker te behouden
+De gebruiker heeft korte, onvolledige aantekeningen gemaakt tijdens een vergadering. Daarnaast heb je toegang tot een automatisch gegenereerd vergadertranscript, dat fouten of onduidelijkheden kan bevatten.
 
-BELANGRIJK:
-- Begin je antwoord altijd met een vergadertitel in het formaat "# Titel" (5-10 woorden die het hoofdonderwerp samenvatten).
-- Gebruik standaard markdown: # voor koppen, - of * voor opsommingen, **tekst** voor vet. Gebruik GEEN tabellen (|) of code blokken (```).
+DOEL  
+Zet de aantekeningen van de gebruiker om in duidelijke, complete en goed gestructureerde vergadernotities, waarbij je het transcript gebruikt als aanvullende bron.
 
-De kwaliteit van het transcript kan slecht zijn - gebruik het om betekenis te extraheren, niet exacte bewoordingen. Vertrouw op de aantekeningen van de gebruiker voor de hoofdonderwerpen.
+TAKEN
+1. Begin altijd met een beknopte vergadertitel op de eerste regel in het formaat:
+   # Titel van de vergadering
+   (5–10 woorden die het hoofdonderwerp samenvatten)
+2. Breid de opsommingstekens van de gebruiker uit met relevante context en details uit het transcript.
+3. Voeg belangrijke beslissingen, actiepunten, afspraken en inzichten toe die logisch volgen uit het transcript, ook als de gebruiker die niet expliciet noteerde.
+4. Vul namen, data, cijfers, deadlines en andere concrete details aan waar mogelijk.
+5. Organiseer de notities in duidelijke secties met logische koppen (bijv. Besproken onderwerpen, Besluiten, Actiepunten, Open vragen).
+6. Behoud de oorspronkelijke structuur, volgorde en intentie van de aantekeningen van de gebruiker zoveel mogelijk.
+
+RICHTLIJNEN
+- Vertrouw primair op de aantekeningen van de gebruiker voor de hoofdonderwerpen.
+- Gebruik het transcript om betekenis te reconstrueren, niet om letterlijk te citeren.
+- Maak aannames alleen als ze sterk ondersteund worden door het transcript; vermijd speculatie.
+- Schrijf beknopt, professioneel en helder.
+
+FORMATTERING
+- Gebruik standaard Markdown:
+  - # voor koppen
+  - - of * voor opsommingen
+  - **vet** voor nadruk
+- Gebruik GEEN tabellen (|) en GEEN codeblokken (```).
+
 {title_instruction}
+
 AANTEKENINGEN GEBRUIKER:
 {user_notes}
 
 VERGADERTRANSCRIPT (kan fouten bevatten):
 {transcript}
 
-VERBETERDE VERGADERNOTITIES:"""
+UITGEWERKTE VERGADERNOTITIES:
+"""
 
 # Fallback prompt when only transcript is available (no user notes)
 NOTES_PROMPT_EN = """You are a meeting notes assistant. Analyze the following meeting transcript and generate clear, structured notes.
@@ -129,10 +147,7 @@ class OllamaClient:
     def is_available(self) -> bool:
         """Check if Ollama is running and accessible."""
         try:
-            response = requests.get(
-                f"{self.config.base_url}/api/tags",
-                timeout=5
-            )
+            response = requests.get(f"{self.config.base_url}/api/tags", timeout=5)
             return response.status_code == 200
         except requests.RequestException:
             return False
@@ -140,10 +155,7 @@ class OllamaClient:
     def list_models(self) -> list[str]:
         """List available models."""
         try:
-            response = requests.get(
-                f"{self.config.base_url}/api/tags",
-                timeout=10
-            )
+            response = requests.get(f"{self.config.base_url}/api/tags", timeout=10)
             if response.status_code == 200:
                 data = response.json()
                 return [model["name"] for model in data.get("models", [])]
@@ -155,7 +167,7 @@ class OllamaClient:
         self,
         prompt: str,
         model: Optional[str] = None,
-        on_token: Optional[Callable[[str], None]] = None
+        on_token: Optional[Callable[[str], None]] = None,
     ) -> str:
         """
         Generate a response from Ollama.
@@ -172,13 +184,9 @@ class OllamaClient:
 
         response = requests.post(
             f"{self.config.base_url}/api/generate",
-            json={
-                "model": model,
-                "prompt": prompt,
-                "stream": on_token is not None
-            },
+            json={"model": model, "prompt": prompt, "stream": on_token is not None},
             timeout=self.config.timeout,
-            stream=on_token is not None
+            stream=on_token is not None,
         )
 
         if response.status_code != 200:
@@ -190,6 +198,7 @@ class OllamaClient:
             for line in response.iter_lines():
                 if line:
                     import json
+
                     data = json.loads(line)
                     token = data.get("response", "")
                     if token:
@@ -212,7 +221,7 @@ class NotesGenerator:
         config: Optional[OllamaConfig] = None,
         on_progress: Optional[Callable[[str], None]] = None,
         on_complete: Optional[Callable[[str], None]] = None,
-        on_error: Optional[Callable[[str], None]] = None
+        on_error: Optional[Callable[[str], None]] = None,
     ):
         self.client = OllamaClient(config)
         self.config = config or OllamaConfig()
@@ -223,7 +232,13 @@ class NotesGenerator:
         self._generation_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
-    def enhance_notes(self, user_notes: str, transcript: str, language: str = "en", user_title: str = "") -> None:
+    def enhance_notes(
+        self,
+        user_notes: str,
+        transcript: str,
+        language: str = "en",
+        user_title: str = "",
+    ) -> None:
         """
         Enhance user notes with transcript context in a background thread.
 
@@ -240,11 +255,13 @@ class NotesGenerator:
         self._generation_thread = threading.Thread(
             target=self._enhance_notes_thread,
             args=(user_notes, transcript, language, user_title),
-            daemon=True
+            daemon=True,
         )
         self._generation_thread.start()
 
-    def _enhance_notes_thread(self, user_notes: str, transcript: str, language: str, user_title: str = ""):
+    def _enhance_notes_thread(
+        self, user_notes: str, transcript: str, language: str, user_title: str = ""
+    ):
         """Background thread for note enhancement."""
         try:
             # Check if Ollama is available
@@ -257,7 +274,9 @@ class NotesGenerator:
             available_models = self.client.list_models()
             if not available_models:
                 if self.on_error:
-                    self.on_error("No models found. Please pull a model first (e.g., 'ollama pull llama3.2')")
+                    self.on_error(
+                        "No models found. Please pull a model first (e.g., 'ollama pull llama3.2')"
+                    )
                 return
 
             # Use configured model or first available
@@ -269,9 +288,9 @@ class NotesGenerator:
 
             # Build title instruction based on whether user provided a title
             if user_title:
-                title_instruction = f'\nUse this exact title: # {user_title}\n'
+                title_instruction = f"\nUse this exact title: # {user_title}\n"
             else:
-                title_instruction = ''
+                title_instruction = ""
 
             # Choose prompt based on whether we have user notes
             if user_notes.strip():
@@ -280,14 +299,13 @@ class NotesGenerator:
                 prompt = prompt_template.format(
                     user_notes=user_notes,
                     transcript=transcript or "(No transcript available)",
-                    title_instruction=title_instruction
+                    title_instruction=title_instruction,
                 )
             else:
                 # No user notes - generate from transcript only
                 prompt_template = NOTES_PROMPTS.get(language, NOTES_PROMPT_EN)
                 prompt = prompt_template.format(
-                    transcript=transcript,
-                    title_instruction=title_instruction
+                    transcript=transcript, title_instruction=title_instruction
                 )
 
             # Generate with streaming
@@ -330,4 +348,6 @@ class NotesGenerator:
 
     def is_generating(self) -> bool:
         """Check if currently generating."""
-        return self._generation_thread is not None and self._generation_thread.is_alive()
+        return (
+            self._generation_thread is not None and self._generation_thread.is_alive()
+        )

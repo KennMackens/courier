@@ -16,6 +16,20 @@ interface SessionHistorySidebarProps {
   onSelectMeeting: (id: string | null) => void
   onDeleteMeeting: (id: string) => Promise<boolean>
   isEmpty: boolean
+  processing?: {
+    transcription: {
+      meetingId: string
+      progress: number
+      elapsedSeconds: number
+      etaSeconds: number | null
+    } | null
+    enhancement: {
+      meetingId: string
+      elapsedSeconds: number
+      queuePosition: number
+      progress: number
+    } | null
+  }
 }
 
 export function SessionHistorySidebar({
@@ -29,7 +43,22 @@ export function SessionHistorySidebar({
   onSelectMeeting,
   onDeleteMeeting,
   isEmpty,
+  processing,
 }: SessionHistorySidebarProps) {
+  const formatDuration = (seconds: number) => {
+    if (!seconds || seconds < 1) return "0s"
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    if (mins === 0) return `${secs}s`
+    if (mins < 60) return `${mins}m ${secs.toString().padStart(2, "0")}s`
+    const hours = Math.floor(mins / 60)
+    const remMins = mins % 60
+    return `${hours}h ${remMins.toString().padStart(2, "0")}m`
+  }
+
+  const activeTranscription = processing?.transcription
+  const activeEnhancement = processing?.enhancement
+
   return (
     <div
       className={cn(
@@ -52,6 +81,63 @@ export function SessionHistorySidebar({
             <span className="sr-only">Close</span>
           </Button>
         </div>
+
+        {/* Processing status */}
+        {(activeTranscription || activeEnhancement) && (
+          <div className="px-4 py-3 border-b border-slate-6 space-y-3 bg-slate-2">
+            {activeTranscription && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm font-semibold text-slate-12">
+                  <span>Transcribing…</span>
+                  <span>{`${Math.round(activeTranscription.progress)}%`}</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-slate-10">
+                  <span>Elapsed {formatDuration(activeTranscription.elapsedSeconds)}</span>
+                  {activeTranscription.etaSeconds !== null && (
+                    <>
+                      <span className="text-slate-8">•</span>
+                      <span>~{formatDuration(activeTranscription.etaSeconds)} remaining</span>
+                    </>
+                  )}
+                </div>
+                <div className="h-2 rounded-full bg-slate-4 overflow-hidden">
+                  <div
+                    className="h-full bg-jade-9 transition-all"
+                    style={{ width: `${Math.min(100, Math.max(0, activeTranscription.progress))}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {activeEnhancement && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm font-semibold text-slate-12">
+                  <span>Enhancing notes…</span>
+                  <span className="text-xs font-medium text-slate-10">
+                    {activeEnhancement.queuePosition > 0
+                      ? `In queue • ${activeEnhancement.queuePosition}`
+                      : "Processing"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-slate-10">
+                  <span>Elapsed {formatDuration(activeEnhancement.elapsedSeconds)}</span>
+                  <span className="text-slate-8">•</span>
+                  <span>Streaming output</span>
+                </div>
+                <div className="h-2 rounded-full bg-slate-4 overflow-hidden">
+                  {activeEnhancement.progress > 0 ? (
+                    <div
+                      className="h-full bg-jade-9 transition-all"
+                      style={{ width: `${Math.min(100, Math.max(0, activeEnhancement.progress))}%` }}
+                    />
+                  ) : (
+                    <div className="h-full w-1/3 min-w-[24%] bg-gradient-to-r from-jade-6 via-jade-9 to-jade-6 animate-pulse" />
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Search */}
         <div className="p-4 border-b border-slate-6">
@@ -111,6 +197,23 @@ export function SessionHistorySidebar({
                   isSelected={selectedMeetingId === meeting.id}
                   onClick={() => onSelectMeeting(meeting.id)}
                   onDelete={() => onDeleteMeeting(meeting.id)}
+                  transcriptionProgress={
+                    processing?.transcription
+                      ? {
+                          meetingId: processing.transcription.meetingId,
+                          progress: processing.transcription.progress,
+                          etaSeconds: processing.transcription.etaSeconds,
+                        }
+                      : null
+                  }
+                  enhancementProgress={
+                    processing?.enhancement
+                      ? {
+                          currentId: processing.enhancement.meetingId,
+                          queuePosition: processing.enhancement.queuePosition,
+                        }
+                      : null
+                  }
                 />
               ))}
             </div>

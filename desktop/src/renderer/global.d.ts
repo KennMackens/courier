@@ -4,9 +4,11 @@
 export interface Settings {
   language: string
   whisperModel: string
+  mlxModel: string
   ollamaModel: string
   ollamaEndpoint: string
   availableModels: string[]
+  recordingThreshold: number // Minimum recording duration in seconds
 }
 
 // Enhancement status type
@@ -62,6 +64,48 @@ export interface MeetingListOptions {
   search?: string
 }
 
+// Model management types
+export interface AvailableModel {
+  id: string
+  name: string
+  size_gb: number
+  description: string
+}
+
+export interface DownloadedModel {
+  modelId: string
+  path: string
+  size: string
+  sizeBytes: number
+  downloadDate: string | null
+}
+
+export interface ModelStatus {
+  exists: boolean
+  modelId: string
+  path?: string
+  size?: string
+  sizeBytes?: number
+  downloadDate?: string | null
+  version?: string | null
+}
+
+export interface DownloadProgress {
+  status: string
+  progress?: number
+  downloaded?: string
+  total?: string
+  speed?: string
+  complete?: boolean
+  cancelled?: boolean
+  path?: string
+}
+
+// System API interface
+export interface SystemAPI {
+  openMicSettings: () => Promise<{ ok: boolean }>
+}
+
 // Python API interface
 export interface PythonAPI {
   // Initialization
@@ -77,6 +121,7 @@ export interface PythonAPI {
   startRecording: (params?: { sampleRate?: number }) => Promise<{
     started: boolean
     actualSampleRate: number
+    microphoneActive: boolean
   }>
   stopRecording: () => Promise<{
     stopped: boolean
@@ -108,11 +153,22 @@ export interface PythonAPI {
   // Session
   resetSession: () => Promise<{ ok: boolean }>
 
+  // Model management
+  downloadModel: (params: { modelId: string }) => Promise<{ complete?: boolean; alreadyDownloaded?: boolean; path?: string }>
+  cancelDownload: () => Promise<{ cancelled: boolean }>
+  isModelDownloaded: (params: { modelId: string }) => Promise<{ downloaded: boolean }>
+  getModelStatus: (params: { modelId: string }) => Promise<ModelStatus>
+  deleteModel: (params: { modelId: string }) => Promise<{ deleted: boolean }>
+  getAvailableModels: () => Promise<{ models: AvailableModel[] }>
+  getDownloadedModels: () => Promise<{ models: DownloadedModel[] }>
+
   // Event listeners
   onTranscribeProgress: (callback: (data: { status?: string; progress?: number; partial?: string }) => void) => () => void
   onEnhanceToken: (callback: (data: { token: string; status?: string }) => void) => () => void
-  onRecordingError: (callback: (message: string) => void) => () => void
+  onRecordingError: (callback: (data: { message: string }) => void) => () => void
+  onRecordingWarning: (callback: (data: { message: string }) => void) => () => void
   onError: (callback: (error: { message: string }) => void) => () => void
+  onDownloadProgress: (callback: (data: DownloadProgress) => void) => () => void
 }
 
 // Database API interface
@@ -153,6 +209,7 @@ declare global {
   interface Window {
     python: PythonAPI
     database: DatabaseAPI
+    system: SystemAPI
   }
 }
 

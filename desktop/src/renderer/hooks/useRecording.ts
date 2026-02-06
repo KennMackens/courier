@@ -1,18 +1,23 @@
 import { useState, useCallback, useEffect, useRef } from "react"
 
 export type RecordingStatus = "idle" | "recording" | "stopping"
+export type MicStatus = "unknown" | "active" | "denied" | "not_granted"
 
 interface RecordingState {
   status: RecordingStatus
   duration: number
   error: string | null
   sampleRate: number | null
+  micStatus: MicStatus
+  micWarning: string | null
 }
 
 interface UseRecordingOptions {
   onError?: (error: string) => void
   onStopped?: (audioLength: number, duration: number) => void
 }
+
+const MIC_TOOLTIP = "Microphone access needed. Click to open System Settings and allow access."
 
 export function useRecording(options: UseRecordingOptions = {}) {
   const { onError, onStopped } = options
@@ -22,20 +27,26 @@ export function useRecording(options: UseRecordingOptions = {}) {
     duration: 0,
     error: null,
     sampleRate: null,
+    micStatus: "unknown",
+    micWarning: null,
   })
 
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const startTimeRef = useRef<number | null>(null)
+  const permissionPollRef = useRef<NodeJS.Timeout | null>(null)
 
   // Listen for recording errors from Python
   useEffect(() => {
-    const unsubscribe = window.python.onRecordingError((error: string) => {
+    const unsubscribeError = window.python.onRecordingError((data: { message: string }) => {
+      const message = data?.message || "Recording error"
       setState((prev) => ({
         ...prev,
         status: "idle",
-        error,
+        error: message,
+        micStatus: "denied",
+        micWarning: MIC_TOOLTIP,
       }))
-      onError?.(error)
+      onError?.(message)
 
       // Clear duration timer
       if (durationIntervalRef.current) {
@@ -44,14 +55,67 @@ export function useRecording(options: UseRecordingOptions = {}) {
       }
     })
 
-    return () => unsubscribe()
+    const unsubscribeWarning = window.python.onRecordingWarning((data: { message: string }) => {
+      const message = data?.message || MIC_TOOLTIP
+      setState((prev) => ({
+        ...prev,
+        micStatus: "denied",
+        micWarning: message,
+      }))
+    })
+
+    return () => {
+      unsubscribeError()
+      unsubscribeWarning()
+    }
   }, [onError])
+
+  // Poll permission while recording to reflect mid-session changes
+  useEffect(() => {
+    if (state.status === "recording") {
+      permissionPollRef.current = setInterval(async () => {
+        try {
+          const perm = await window.python.checkPermission()
+          // Only downgrade when permission is revoked; do not auto-upgrade to avoid false positives
+          if (!perm.granted) {
+            setState((prev) => ({
+              ...prev,
+              micStatus: "denied",
+              micWarning: MIC_TOOLTIP,
+            }))
+          }
+        } catch {
+          // ignore polling errors
+        }
+      }, 3000)
+    } else if (permissionPollRef.current) {
+      clearInterval(permissionPollRef.current)
+      permissionPollRef.current = null
+    }
+
+    return () => {
+      if (permissionPollRef.current) {
+        clearInterval(permissionPollRef.current)
+        permissionPollRef.current = null
+      }
+    }
+  }, [state.status])
 
   // Start recording
   const startRecording = useCallback(async () => {
-    setState((prev) => ({ ...prev, error: null, status: "recording" }))
+    setState((prev) => ({ ...prev, error: null }))
 
     try {
+      // Preflight permission check
+      const perm = await window.python.checkPermission()
+
+      setState((prev) => ({
+        ...prev,
+        status: "recording",
+        micStatus: perm.granted ? "unknown" : "not_granted",
+        micWarning: perm.granted ? null : MIC_TOOLTIP,
+      }))
+
       const result = await window.python.startRecording({ sampleRate: 16000 })
 
       if (result.started) {
@@ -69,12 +133,15 @@ export function useRecording(options: UseRecordingOptions = {}) {
           ...prev,
           status: "recording",
           sampleRate: result.actualSampleRate || 16000,
+          micStatus: result.microphoneActive ? "active" : "denied",
+          micWarning: result.microphoneActive ? null : MIC_TOOLTIP,
         }))
       } else {
         setState((prev) => ({
           ...prev,
           status: "idle",
           error: "Failed to start recording",
+          micStatus: "unknown",
         }))
       }
     } catch (error) {
@@ -83,6 +150,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
         ...prev,
         status: "idle",
         error: errorMessage,
+        micStatus: "unknown",
       }))
       onError?.(errorMessage)
     }
@@ -129,12 +197,18 @@ export function useRecording(options: UseRecordingOptions = {}) {
       clearInterval(durationIntervalRef.current)
       durationIntervalRef.current = null
     }
+    if (permissionPollRef.current) {
+      clearInterval(permissionPollRef.current)
+      permissionPollRef.current = null
+    }
     startTimeRef.current = null
     setState({
       status: "idle",
       duration: 0,
       error: null,
       sampleRate: null,
+      micStatus: "unknown",
+      micWarning: null,
     })
   }, [])
 
@@ -144,6 +218,9 @@ export function useRecording(options: UseRecordingOptions = {}) {
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current)
       }
+      if (permissionPollRef.current) {
+        clearInterval(permissionPollRef.current)
+      }
     }
   }, [])
 
@@ -152,6 +229,8 @@ export function useRecording(options: UseRecordingOptions = {}) {
     isRecording: state.status === "recording",
     isStopping: state.status === "stopping",
     isIdle: state.status === "idle",
+    hasMicAccess: state.micStatus === "active",
+    isSystemAudioOnly: state.status === "recording" && state.micStatus !== "active",
     startRecording,
     stopRecording,
     reset,

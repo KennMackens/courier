@@ -16,6 +16,12 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
+
+def _debug(msg: str) -> None:
+    """Print debug message to stderr to avoid corrupting IPC stdout."""
+    print(f"[IPC] {msg}", file=sys.stderr, flush=True)
+
+
 from .ipc_protocol import (
     IPCReader, IPCWriter, Request, ErrorCode,
     parse_request
@@ -23,6 +29,8 @@ from .ipc_protocol import (
 from .recorder import CoreAudioTapRecorder, AudioConfig
 from .transcriber import Transcriber, TranscriberConfig, WHISPER_MODELS
 from .ollama import OllamaClient, OllamaConfig, NotesGenerator
+from .mlx_inference import MLXConfig, MLXNotesGenerator, DEFAULT_MLX_MODEL
+from .model_manager import ModelManager, ModelManagerConfig, DownloadProgress
 
 
 @dataclass
@@ -30,8 +38,10 @@ class Settings:
     """Application settings."""
     language: str = "nl"
     whisper_model: str = "medium"
+    mlx_model: str = DEFAULT_MLX_MODEL
     ollama_model: str = "llama3.2"
     ollama_endpoint: str = "http://localhost:11434"
+    recording_threshold: int = 30  # Minimum recording duration in seconds
 
 
 class IPCServer:
@@ -58,6 +68,18 @@ class IPCServer:
         self._pending_transcription: Optional[str] = None
         self._pending_enhancement: Optional[str] = None
         self._notes_generator: Optional[NotesGenerator] = None
+        self._mlx_notes_generator: Optional[MLXNotesGenerator] = None
+
+        # Model manager for MLX models
+        self._model_manager = ModelManager()
+
+        # Check if MLX model is available
+        self._mlx_model_path = self._model_manager.get_model_path(DEFAULT_MLX_MODEL)
+        if self._mlx_model_path is None:
+            # Try scanning for any downloaded model
+            local_models = self._model_manager.scan_local_models()
+            if local_models:
+                self._mlx_model_path = local_models[0].local_path
 
         # Path to Swift helper
         self._helper_path = Path(__file__).parent / "bin" / "courier-audio-helper"
@@ -75,6 +97,14 @@ class IPCServer:
             "enhanceNotes": self._handle_enhance_notes,
             "resetSession": self._handle_reset_session,
             "getOllamaModels": self._handle_get_ollama_models,
+            # Model management
+            "downloadModel": self._handle_download_model,
+            "cancelDownload": self._handle_cancel_download,
+            "isModelDownloaded": self._handle_is_model_downloaded,
+            "getModelStatus": self._handle_get_model_status,
+            "deleteModel": self._handle_delete_model,
+            "getAvailableModels": self._handle_get_available_models,
+            "getDownloadedModels": self._handle_get_downloaded_models,
         }
 
     def run(self):
@@ -149,9 +179,11 @@ class IPCServer:
         self.writer.send_result(request.id, {
             "language": self.settings.language,
             "whisperModel": self.settings.whisper_model,
+            "mlxModel": self.settings.mlx_model,
             "ollamaModel": self.settings.ollama_model,
             "ollamaEndpoint": self.settings.ollama_endpoint,
-            "availableModels": [m[0] for m in WHISPER_MODELS]
+            "availableModels": [m[0] for m in WHISPER_MODELS],
+            "recordingThreshold": self.settings.recording_threshold
         })
 
     def _handle_set_settings(self, request: Request):
@@ -162,10 +194,16 @@ class IPCServer:
             self.settings.language = params["language"]
         if "whisperModel" in params:
             self.settings.whisper_model = params["whisperModel"]
+        if "mlxModel" in params:
+            self.settings.mlx_model = params["mlxModel"]
+            # Update the cached model path
+            self._mlx_model_path = self._model_manager.get_model_path(self.settings.mlx_model)
         if "ollamaModel" in params:
             self.settings.ollama_model = params["ollamaModel"]
         if "ollamaEndpoint" in params:
             self.settings.ollama_endpoint = params["ollamaEndpoint"]
+        if "recordingThreshold" in params:
+            self.settings.recording_threshold = params["recordingThreshold"]
 
         self.writer.send_result(request.id, {"ok": True})
 
@@ -232,8 +270,16 @@ class IPCServer:
         def on_error(message: str):
             self.writer.send_notification("recordingError", {"message": message})
 
+        def on_warning(message: str):
+            # Surface non-fatal warnings (e.g., microphone unavailable) to the UI
+            self.writer.send_notification("recordingWarning", {"message": message})
+
         config = AudioConfig(sample_rate=sample_rate)
-        self.recorder = CoreAudioTapRecorder(config=config, on_error=on_error)
+        self.recorder = CoreAudioTapRecorder(
+            config=config,
+            on_error=on_error,
+            on_warning=on_warning,
+        )
 
         # Start recording in a background thread (start() blocks until ready)
         def start_async():
@@ -243,7 +289,8 @@ class IPCServer:
                 # Recording started successfully
                 self.writer.send_result(request_id, {
                     "started": True,
-                    "actualSampleRate": self.recorder._actual_sample_rate or sample_rate
+                    "actualSampleRate": self.recorder._actual_sample_rate or sample_rate,
+                    "microphoneActive": self.recorder.microphone_active,
                 })
             else:
                 self.writer.send_error(
@@ -271,7 +318,9 @@ class IPCServer:
 
         def stop_async():
             try:
+                _debug("Stopping recorder...")
                 audio = recorder.stop()
+                _debug(f"Recorder stopped, audio shape: {audio.shape if audio is not None else 'None'}")
 
                 # Append to buffer (session continuity)
                 if audio is not None and len(audio) > 0:
@@ -281,6 +330,7 @@ class IPCServer:
                         self.audio_buffer = np.concatenate([self.audio_buffer, audio])
 
                     duration = len(audio) / 16000  # Assuming 16kHz
+                    _debug(f"Audio buffer updated: {len(self.audio_buffer)} samples, {duration:.1f}s")
 
                     self.writer.send_result(request_id, {
                         "stopped": True,
@@ -289,6 +339,7 @@ class IPCServer:
                         "totalBufferLength": len(self.audio_buffer)
                     })
                 else:
+                    _debug("WARNING: No audio captured!")
                     self.writer.send_result(request_id, {
                         "stopped": True,
                         "audioLength": 0,
@@ -308,7 +359,10 @@ class IPCServer:
 
     def _handle_transcribe(self, request: Request):
         """Transcribe the recorded audio."""
+        _debug(f"Transcribe request received. Audio buffer: {len(self.audio_buffer) if self.audio_buffer is not None else 'None'}")
+
         if self.audio_buffer is None or len(self.audio_buffer) == 0:
+            _debug("ERROR: No audio buffer available!")
             self.writer.send_error(
                 request.id,
                 ErrorCode.TRANSCRIPTION_ERROR,
@@ -321,12 +375,14 @@ class IPCServer:
         model = params.get("model", self.settings.whisper_model)
 
         request_id = request.id
+        _debug(f"Starting transcription: language={language}, model={model}, audio_length={len(self.audio_buffer)}")
 
         # Create transcriber with current settings
         config = TranscriberConfig(model_size=model, language=language)
         self.transcriber = Transcriber(config)
 
         def on_complete(transcript: str):
+            _debug(f"Transcription complete: {len(transcript)} chars, first 100: {transcript[:100] if transcript else '(empty)'}")
             # Append to session transcript
             if self.transcript:
                 self.transcript += "\n\n" + transcript
@@ -340,6 +396,7 @@ class IPCServer:
             }, done=True)
 
         def on_error(error: str):
+            _debug(f"Transcription error: {error}")
             self.writer.send_error(request_id, ErrorCode.TRANSCRIPTION_ERROR, error)
 
         # Start transcription (this already runs in background thread)
@@ -359,12 +416,26 @@ class IPCServer:
     # --- Note enhancement handler ---
 
     def _handle_enhance_notes(self, request: Request):
-        """Enhance notes with LLM."""
+        """Enhance notes with LLM (MLX by default, Ollama as fallback)."""
         params = request.params or {}
         notes = params.get("notes", "")
         transcript = params.get("transcript", self.transcript)
         language = params.get("language", self.settings.language)
         user_title = params.get("userTitle", "")
+        use_ollama = params.get("useOllama", False)  # Force Ollama if requested
+
+        _debug(f"[IPC] Enhance notes request: notes={len(notes)} chars, transcript={len(transcript) if transcript else 0} chars, language={language}")
+
+        # Check if an enhancement is already in progress
+        if self._mlx_notes_generator and self._mlx_notes_generator.is_generating():
+            _debug("[IPC] Enhancement already in progress, stopping previous request")
+            self._mlx_notes_generator.stop()
+            self._mlx_notes_generator = None
+
+        if self._notes_generator and self._notes_generator.is_generating():
+            _debug("[IPC] Ollama enhancement already in progress, stopping previous request")
+            self._notes_generator.stop()
+            self._notes_generator = None
 
         if not notes and not transcript:
             self.writer.send_error(
@@ -376,20 +447,73 @@ class IPCServer:
 
         request_id = request.id
 
+        def on_token(token: str):
+            try:
+                self.writer.send_stream(request_id, {"token": token}, done=False)
+            except Exception as e:
+                _debug(f"Error sending token: {e}")
+
+        def on_complete(full_response: str):
+            _debug(f"Enhancement complete: {len(full_response)} chars")
+            # Clean up generator references
+            self._mlx_notes_generator = None
+            self._notes_generator = None
+            try:
+                self.writer.send_stream(request_id, {"complete": True}, done=True)
+            except Exception as e:
+                _debug(f"Error sending complete: {e}")
+
+        # Get the model path for the selected MLX model
+        mlx_model_path = self._model_manager.get_model_path(self.settings.mlx_model)
+        _debug(f"MLX model path: {mlx_model_path}")
+
+        # Try MLX first (unless Ollama explicitly requested)
+        if not use_ollama and mlx_model_path:
+            def on_mlx_error(error: str):
+                _debug(f"MLX error: {error}")
+                # Report MLX error directly - don't fall back to Ollama automatically
+                # Ollama is only used when explicitly requested via useOllama parameter
+                self.writer.send_error(request_id, ErrorCode.INTERNAL_ERROR, f"MLX enhancement failed: {error}")
+
+            try:
+                # Configure MLX with the selected model
+                mlx_config = MLXConfig(model_path=mlx_model_path)
+                _debug(f"Creating MLX generator with config: {mlx_config}")
+
+                # Create and start MLX generator
+                self._mlx_notes_generator = MLXNotesGenerator(
+                    config=mlx_config,
+                    on_progress=on_token,
+                    on_complete=on_complete,
+                    on_error=on_mlx_error
+                )
+
+                _debug("Starting MLX enhancement...")
+                self._mlx_notes_generator.enhance_notes(notes, transcript, language, user_title)
+
+                # Send acknowledgment
+                self.writer.send_stream(request_id, {"status": "started", "backend": "mlx", "model": self.settings.mlx_model}, done=False)
+            except Exception as e:
+                _debug(f"Exception in MLX setup: {e}")
+                import traceback
+                _debug(traceback.format_exc())
+                on_mlx_error(str(e))
+        else:
+            # Use Ollama
+            _debug("Using Ollama for enhancement")
+            self._enhance_with_ollama(request_id, notes, transcript, language, user_title, on_token, on_complete)
+
+    def _enhance_with_ollama(self, request_id: str, notes: str, transcript: str,
+                              language: str, user_title: str, on_token, on_complete):
+        """Fallback enhancement using Ollama."""
+        def on_error(error: str):
+            self.writer.send_error(request_id, ErrorCode.OLLAMA_NOT_AVAILABLE, error)
+
         # Configure Ollama
         ollama_config = OllamaConfig(
             base_url=self.settings.ollama_endpoint,
             model=self.settings.ollama_model
         )
-
-        def on_token(token: str):
-            self.writer.send_stream(request_id, {"token": token}, done=False)
-
-        def on_complete(full_response: str):
-            self.writer.send_stream(request_id, {"complete": True}, done=True)
-
-        def on_error(error: str):
-            self.writer.send_error(request_id, ErrorCode.OLLAMA_NOT_AVAILABLE, error)
 
         # Create and start generator
         self._notes_generator = NotesGenerator(
@@ -402,7 +526,7 @@ class IPCServer:
         self._notes_generator.enhance_notes(notes, transcript, language, user_title)
 
         # Send acknowledgment
-        self.writer.send_stream(request_id, {"status": "started"}, done=False)
+        self.writer.send_stream(request_id, {"status": "started", "backend": "ollama"}, done=False)
 
     # --- Session management ---
 
@@ -419,6 +543,189 @@ class IPCServer:
         client = OllamaClient(ollama_config)
         models = client.list_models()
         self.writer.send_result(request.id, {"models": models})
+
+    # --- Model management handlers ---
+
+    def _handle_download_model(self, request: Request):
+        """Download an MLX model from HuggingFace with streaming progress."""
+        params = request.params or {}
+        model_id = params.get("modelId")
+
+        if not model_id:
+            self.writer.send_error(
+                request.id,
+                ErrorCode.INVALID_PARAMS,
+                "modelId is required"
+            )
+            return
+
+        # Check if already downloaded
+        if self._model_manager.is_model_downloaded(model_id):
+            self.writer.send_result(request.id, {
+                "alreadyDownloaded": True,
+                "path": self._model_manager.get_model_path(model_id)
+            })
+            return
+
+        request_id = request.id
+
+        def on_progress(progress: DownloadProgress):
+            # Format sizes for display
+            downloaded_mb = progress.bytes_downloaded / (1024 * 1024)
+            total_mb = progress.total_bytes / (1024 * 1024) if progress.total_bytes > 0 else 0
+            speed_mb = progress.speed_bytes_per_sec / (1024 * 1024)
+
+            self.writer.send_stream(request_id, {
+                "status": progress.status,
+                "progress": progress.percentage,
+                "downloaded": f"{downloaded_mb:.1f} MB",
+                "total": f"{total_mb:.1f} MB" if total_mb > 0 else "unknown",
+                "speed": f"{speed_mb:.1f} MB/s" if speed_mb > 0 else "",
+            }, done=False)
+
+            # Send completion when done
+            if progress.status == "completed":
+                self.writer.send_stream(request_id, {
+                    "complete": True,
+                    "path": self._model_manager.get_model_path(model_id)
+                }, done=True)
+            elif progress.status == "failed":
+                self.writer.send_error(
+                    request_id,
+                    ErrorCode.MODEL_DOWNLOAD_ERROR,
+                    progress.error or "Download failed"
+                )
+            elif progress.status == "cancelled":
+                self.writer.send_stream(request_id, {
+                    "cancelled": True
+                }, done=True)
+
+        # Start download in background (non-blocking)
+        try:
+            self._model_manager.download_model(
+                model_id,
+                on_progress=on_progress,
+                blocking=False
+            )
+            # Send acknowledgment
+            self.writer.send_stream(request_id, {
+                "status": "starting",
+                "modelId": model_id
+            }, done=False)
+        except RuntimeError as e:
+            self.writer.send_error(
+                request.id,
+                ErrorCode.MODEL_DOWNLOAD_IN_PROGRESS,
+                str(e)
+            )
+
+    def _handle_cancel_download(self, request: Request):
+        """Cancel an in-progress model download."""
+        cancelled = self._model_manager.cancel_download()
+        self.writer.send_result(request.id, {"cancelled": cancelled})
+
+    def _handle_is_model_downloaded(self, request: Request):
+        """Check if a model is downloaded and ready to use."""
+        params = request.params or {}
+        model_id = params.get("modelId")
+
+        if not model_id:
+            self.writer.send_error(
+                request.id,
+                ErrorCode.INVALID_PARAMS,
+                "modelId is required"
+            )
+            return
+
+        is_downloaded = self._model_manager.is_model_downloaded(model_id)
+        self.writer.send_result(request.id, {"downloaded": is_downloaded})
+
+    def _handle_get_model_status(self, request: Request):
+        """Get detailed status of a model."""
+        params = request.params or {}
+        model_id = params.get("modelId")
+
+        if not model_id:
+            self.writer.send_error(
+                request.id,
+                ErrorCode.INVALID_PARAMS,
+                "modelId is required"
+            )
+            return
+
+        info = self._model_manager.get_model_info(model_id)
+        if info:
+            size_mb = info.size_bytes / (1024 * 1024)
+            self.writer.send_result(request.id, {
+                "exists": True,
+                "modelId": info.model_id,
+                "path": info.local_path,
+                "size": f"{size_mb:.1f} MB",
+                "sizeBytes": info.size_bytes,
+                "downloadDate": info.download_date,
+                "version": info.version
+            })
+        else:
+            # Check if it's downloaded but not in manifest
+            if self._model_manager.is_model_downloaded(model_id):
+                path = self._model_manager.get_model_path(model_id)
+                self.writer.send_result(request.id, {
+                    "exists": True,
+                    "modelId": model_id,
+                    "path": path,
+                    "size": "unknown",
+                    "sizeBytes": 0,
+                    "downloadDate": None,
+                    "version": None
+                })
+            else:
+                self.writer.send_result(request.id, {
+                    "exists": False,
+                    "modelId": model_id
+                })
+
+    def _handle_delete_model(self, request: Request):
+        """Delete a downloaded model."""
+        params = request.params or {}
+        model_id = params.get("modelId")
+
+        if not model_id:
+            self.writer.send_error(
+                request.id,
+                ErrorCode.INVALID_PARAMS,
+                "modelId is required"
+            )
+            return
+
+        deleted = self._model_manager.delete_model(model_id)
+        if deleted:
+            self.writer.send_result(request.id, {"deleted": True})
+        else:
+            self.writer.send_error(
+                request.id,
+                ErrorCode.MODEL_NOT_FOUND,
+                f"Model not found: {model_id}"
+            )
+
+    def _handle_get_available_models(self, request: Request):
+        """Get list of recommended models that can be downloaded."""
+        models = self._model_manager.get_available_models()
+        self.writer.send_result(request.id, {"models": models})
+
+    def _handle_get_downloaded_models(self, request: Request):
+        """Get list of all downloaded models."""
+        models = self._model_manager.scan_local_models()
+        result = []
+        for info in models:
+            size_mb = info.size_bytes / (1024 * 1024)
+            result.append({
+                "modelId": info.model_id,
+                "path": info.local_path,
+                "size": f"{size_mb:.1f} MB",
+                "sizeBytes": info.size_bytes,
+                "downloadDate": info.download_date
+            })
+        self.writer.send_result(request.id, {"models": result})
 
 
 def main():
