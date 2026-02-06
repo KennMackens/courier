@@ -473,7 +473,7 @@ export function SettingsModal({
                                 "text-[11px] px-2 py-0.5 rounded-full border",
                                 micStatus === "active"
                                   ? "text-jade-12 border-jade-7 bg-jade-3/70"
-                                  : "text-amber-12 border-amber-7 bg-amber-3/70"
+                                  : "text-red-12 border-red-7 bg-red-3/70"
                               )}
                             >
                               {micStatus === "active" ? "Ready" : "Action needed"}
@@ -487,16 +487,18 @@ export function SettingsModal({
                           </p>
                         </div>
                       </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={onMicClick}
-                        disabled={!onMicClick}
-                        className="relative z-10"
-                      >
-                        Open System Settings
-                      </Button>
+                      {micStatus !== "active" && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={onMicClick}
+                          disabled={!onMicClick}
+                          className="relative z-10"
+                        >
+                          Open System Settings
+                        </Button>
+                      )}
                     </div>
 
                     <div className="space-y-3 pt-1">
@@ -544,7 +546,7 @@ export function SettingsModal({
                                   "text-[11px] px-2 py-0.5 rounded-full border",
                                   systemAudioAvailable
                                     ? "text-jade-12 border-jade-7 bg-jade-3/70"
-                                    : "text-amber-12 border-amber-7 bg-amber-3/70"
+                                    : "text-red-12 border-red-7 bg-red-3/70"
                                 )}
                               >
                                 {systemAudioAvailable ? "Ready" : "Action needed"}
@@ -557,16 +559,18 @@ export function SettingsModal({
                             </p>
                           </div>
                         </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={onMicClick}
-                          disabled={!onMicClick}
-                          className="relative z-10"
-                        >
-                          Open System Settings
-                        </Button>
+                        {!systemAudioAvailable && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={onMicClick}
+                            disabled={!onMicClick}
+                            className="relative z-10"
+                          >
+                            Open System Settings
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </div>
