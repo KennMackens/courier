@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo } from "react"
+import { useState, useCallback, useRef, useMemo, useEffect } from "react"
 import ReactMarkdown from "react-markdown"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
@@ -89,6 +89,12 @@ export function HistorySessionView({
   // Local state for editable notes
   const [editedNotes, setEditedNotes] = useState<string | null>(null)
   const currentNotes = editedNotes !== null ? editedNotes : getEnhancedNotes()
+
+  // Reset edit mode when meeting changes
+  useEffect(() => {
+    setIsEditing(false)
+    setEditedNotes(null)
+  }, [meeting.id])
 
   const handleNotesChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {

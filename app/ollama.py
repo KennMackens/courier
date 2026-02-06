@@ -30,7 +30,9 @@ Your task is to ENHANCE the user's notes by:
 5. Organizing the notes into clear sections
 6. Keeping the user's original structure and intent
 
-IMPORTANT: Always start your response with a meeting title in the format "# Title" (5-10 words summarizing the main topic).
+IMPORTANT:
+- Always start your response with a meeting title in the format "# Title" (5-10 words summarizing the main topic).
+- Use standard markdown: # for headers, - or * for bullet points, **text** for bold. Do NOT use tables (|) or code fences (```).
 
 The transcript quality may be poor - use it to extract meaning, not exact wording. Trust the user's notes for key topics.
 {title_instruction}
@@ -52,7 +54,9 @@ Je taak is om de aantekeningen van de gebruiker te VERBETEREN door:
 5. De notities in duidelijke secties te organiseren
 6. De oorspronkelijke structuur en intentie van de gebruiker te behouden
 
-BELANGRIJK: Begin je antwoord altijd met een vergadertitel in het formaat "# Titel" (5-10 woorden die het hoofdonderwerp samenvatten).
+BELANGRIJK:
+- Begin je antwoord altijd met een vergadertitel in het formaat "# Titel" (5-10 woorden die het hoofdonderwerp samenvatten).
+- Gebruik standaard markdown: # voor koppen, - of * voor opsommingen, **tekst** voor vet. Gebruik GEEN tabellen (|) of code blokken (```).
 
 De kwaliteit van het transcript kan slecht zijn - gebruik het om betekenis te extraheren, niet exacte bewoordingen. Vertrouw op de aantekeningen van de gebruiker voor de hoofdonderwerpen.
 {title_instruction}
@@ -67,7 +71,9 @@ VERBETERDE VERGADERNOTITIES:"""
 # Fallback prompt when only transcript is available (no user notes)
 NOTES_PROMPT_EN = """You are a meeting notes assistant. Analyze the following meeting transcript and generate clear, structured notes.
 
-IMPORTANT: Start with a concise meeting title in the format "# Title" (5-10 words summarizing the main topic).
+IMPORTANT:
+- Start with a concise meeting title in the format "# Title" (5-10 words summarizing the main topic).
+- Use standard markdown: # for headers, - or * for bullet points, **text** for bold. Do NOT use tables (|) or code fences (```).
 {title_instruction}
 Include:
 1. **Summary**: A brief 2-3 sentence overview of the meeting
@@ -85,7 +91,9 @@ MEETING NOTES:"""
 
 NOTES_PROMPT_NL = """Je bent een assistent voor vergadernotities. Analyseer het volgende vergadertranscript en genereer duidelijke, gestructureerde notities.
 
-BELANGRIJK: Begin met een beknopte vergadertitel in het formaat "# Titel" (5-10 woorden die het hoofdonderwerp samenvatten).
+BELANGRIJK:
+- Begin met een beknopte vergadertitel in het formaat "# Titel" (5-10 woorden die het hoofdonderwerp samenvatten).
+- Gebruik standaard markdown: # voor koppen, - of * voor opsommingen, **tekst** voor vet. Gebruik GEEN tabellen (|) of code blokken (```).
 {title_instruction}
 Neem op:
 1. **Samenvatting**: Een korte overview van 2-3 zinnen van de vergadering
