@@ -7,6 +7,21 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Jade scale for direct class usage (bg-jade-*, text-jade-*)
+        jade: {
+          1: 'var(--jade-1)',
+          2: 'var(--jade-2)',
+          3: 'var(--jade-3)',
+          4: 'var(--jade-4)',
+          5: 'var(--jade-5)',
+          6: 'var(--jade-6)',
+          7: 'var(--jade-7)',
+          8: 'var(--jade-8)',
+          9: 'var(--jade-9)',
+          10: 'var(--jade-10)',
+          11: 'var(--jade-11)',
+          12: 'var(--jade-12)',
+        },
         // Primary - Jade (Radix jade scale via CSS variables)
         primary: {
           1: 'var(--jade-1)',
@@ -23,6 +38,21 @@ export default {
           12: 'var(--jade-12)',
           DEFAULT: 'var(--primary)',
           foreground: 'var(--primary-foreground)',
+        },
+        // Pink scale for direct class usage (bg-pink-*, text-pink-*)
+        pink: {
+          1: 'var(--pink-1)',
+          2: 'var(--pink-2)',
+          3: 'var(--pink-3)',
+          4: 'var(--pink-4)',
+          5: 'var(--pink-5)',
+          6: 'var(--pink-6)',
+          7: 'var(--pink-7)',
+          8: 'var(--pink-8)',
+          9: 'var(--pink-9)',
+          10: 'var(--pink-10)',
+          11: 'var(--pink-11)',
+          12: 'var(--pink-12)',
         },
         // Accent - Pink (Radix pink scale via CSS variables)
         accent: {

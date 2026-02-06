@@ -16,6 +16,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
 import {
   Collapsible,
   CollapsibleContent,
@@ -31,7 +32,6 @@ import {
   Settings,
   LANGUAGE_OPTIONS,
   WHISPER_MODEL_OPTIONS,
-  THEME_OPTIONS,
   RECORDING_THRESHOLD_OPTIONS,
 } from "@/hooks/useSettings"
 import { useModelManager } from "@/hooks/useModelManager"
@@ -54,13 +54,12 @@ interface SettingsModalProps {
   systemAudioAvailable?: boolean
 }
 
-type SettingsTab = "recording" | "transcription" | "enhancement" | "appearance" | "account"
+type SettingsTab = "recording" | "transcription" | "enhancement" | "account"
 
 const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: "recording", label: "Recording" },
   { id: "transcription", label: "Transcription" },
   { id: "enhancement", label: "Enhancement" },
-  { id: "appearance", label: "Appearance" },
   { id: "account", label: "Account" },
 ]
 
@@ -432,7 +431,7 @@ export function SettingsModal({
                       className={cn(
                         "relative flex items-center justify-between p-3 rounded-lg border overflow-hidden",
                         micStatus === "active"
-                          ? "bg-jade-3/50 border-jade-7"
+                          ? "bg-slate-1 border-slate-6"
                           : "bg-amber-3/40 border-amber-7"
                       )}
                     >
@@ -468,16 +467,16 @@ export function SettingsModal({
                               {micStatus === "not_granted" && "Permission required"}
                               {micStatus === "unknown" && "Microphone status unknown"}
                             </p>
-                            <span
-                              className={cn(
-                                "text-[11px] px-2 py-0.5 rounded-full border",
-                                micStatus === "active"
-                                  ? "text-jade-12 border-jade-7 bg-jade-3/70"
-                                  : "text-red-12 border-red-7 bg-red-3/70"
-                              )}
-                            >
-                              {micStatus === "active" ? "Ready" : "Action needed"}
-                            </span>
+                              <span
+                                className={cn(
+                                  "text-[11px] px-2 py-0.5 rounded-full border",
+                                  micStatus === "active"
+                                  ? "text-jade-11 border-jade-7 bg-jade-3"
+                                  : "text-red-11 border-red-6 bg-red-3"
+                                )}
+                              >
+                                {micStatus === "active" ? "Ready" : "Action needed"}
+                              </span>
                           </div>
                           <p className="text-xs text-slate-11">
                             {micTooltip ||
@@ -507,21 +506,18 @@ export function SettingsModal({
                         className={cn(
                           "relative flex items-center justify-between p-3 rounded-lg border overflow-hidden",
                           systemAudioAvailable
-                            ? "bg-jade-3/50 border-jade-7"
+                            ? "bg-slate-1 border-slate-6"
                             : "bg-amber-3/40 border-amber-7"
                         )}
                       >
-                        <span
-                          className={cn(
-                            "absolute left-0 top-0 h-full w-1",
-                            systemAudioAvailable ? "bg-jade-9" : "bg-amber-9"
-                          )}
-                        />
+                        {!systemAudioAvailable && (
+                          <span className="absolute left-0 top-0 h-full w-1 bg-amber-9" />
+                        )}
                         <div className="flex items-center gap-3 pl-2">
                           <div
                             className={cn(
                               "flex h-10 w-10 items-center justify-center rounded-full",
-                              systemAudioAvailable ? "bg-jade-4" : "bg-amber-4"
+                              systemAudioAvailable ? "bg-jade-3" : "bg-amber-4"
                             )}
                           >
                             <Volume2
@@ -545,8 +541,8 @@ export function SettingsModal({
                                 className={cn(
                                   "text-[11px] px-2 py-0.5 rounded-full border",
                                   systemAudioAvailable
-                                    ? "text-jade-12 border-jade-7 bg-jade-3/70"
-                                    : "text-red-12 border-red-7 bg-red-3/70"
+                                  ? "text-jade-11 border-jade-7 bg-jade-3"
+                                  : "text-red-11 border-red-6 bg-red-3"
                                 )}
                               >
                                 {systemAudioAvailable ? "Ready" : "Action needed"}
@@ -785,37 +781,6 @@ export function SettingsModal({
                 </div>
               )}
 
-              {activeTab === "appearance" && (
-                <div
-                  className="space-y-6"
-                  role="tabpanel"
-                  id="settings-panel-appearance"
-                  aria-labelledby="settings-tab-appearance"
-                >
-                  {/* Theme */}
-                  <div className="space-y-2">
-                    <Label htmlFor="theme">Theme</Label>
-                    <Select
-                      value={formState.theme}
-                      onValueChange={(value) =>
-                        updateField("theme", value as Settings["theme"])
-                      }
-                    >
-                      <SelectTrigger id="theme">
-                        <SelectValue placeholder="Select theme" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {THEME_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              )}
-
               {activeTab === "account" && (
                 <div
                   className="space-y-6"
@@ -823,6 +788,20 @@ export function SettingsModal({
                   id="settings-panel-account"
                   aria-labelledby="settings-tab-account"
                 >
+                  <div className="flex items-center justify-between p-3 rounded-lg border border-slate-6 bg-slate-2">
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-slate-12">Dark Mode</p>
+                      <p className="text-xs text-slate-10">
+                        Toggle the app theme between dark and light.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={formState.theme === "dark"}
+                      onCheckedChange={(checked) => updateField("theme", checked ? "dark" : "light")}
+                      aria-label="Toggle dark mode"
+                    />
+                  </div>
+
                   <h3 className="text-sm font-semibold text-slate-12">Account</h3>
 
                   <div className="space-y-3">
