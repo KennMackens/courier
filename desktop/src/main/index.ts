@@ -6,9 +6,17 @@
 
 import { app, BrowserWindow, shell } from 'electron'
 import * as path from 'path'
+import * as fs from 'fs'
 import { getPythonBridge } from './python-bridge'
 import { registerIpcHandlers, removeIpcHandlers } from './ipc-handlers'
 import { initializeDatabaseHandlers, closeDatabaseHandlers } from './database/ipc-handlers'
+
+function writeLog(msg: string): void {
+  const logDir = app.getPath('logs')
+  fs.mkdirSync(logDir, { recursive: true })
+  fs.appendFileSync(path.join(logDir, 'main.log'), `[${new Date().toISOString()}] ${msg}\n`)
+  console.log(msg)
+}
 
 let mainWindow: BrowserWindow | null = null
 const isDev = !app.isPackaged
@@ -47,9 +55,9 @@ async function createWindow(): Promise<void> {
   // Initialize database
   try {
     initializeDatabaseHandlers()
-    console.log('[Main] Database handlers initialized')
+    writeLog('[Main] Database handlers initialized')
   } catch (error) {
-    console.error('[Main] Failed to initialize database:', error)
+    writeLog(`[Main] FATAL: Failed to initialize database: ${error}`)
   }
 
   // Register IPC handlers FIRST (before starting Python)

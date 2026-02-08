@@ -9,6 +9,7 @@ Usage:
 """
 
 import sys
+import os
 import subprocess
 import threading
 import numpy as np
@@ -81,8 +82,12 @@ class IPCServer:
             if local_models:
                 self._mlx_model_path = local_models[0].local_path
 
-        # Path to Swift helper
-        self._helper_path = Path(__file__).parent / "bin" / "courier-audio-helper"
+        # Path to Swift helper - use env var when bundled (set by Electron)
+        bundled_helper = os.environ.get("OTTO_AUDIO_HELPER")
+        if bundled_helper:
+            self._helper_path = Path(bundled_helper)
+        else:
+            self._helper_path = Path(__file__).parent / "bin" / "courier-audio-helper"
 
         # Method handlers
         self._handlers: Dict[str, callable] = {
