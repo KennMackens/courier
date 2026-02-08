@@ -137,15 +137,37 @@ function runMigrations(db: Database.Database): void {
 
     // Run migrations in order
     for (let v = currentVersion + 1; v <= SCHEMA_VERSION; v++) {
-      const migration = MIGRATIONS[v]
-      if (migration) {
-        console.log(`[Database] Applying migration v${v}`)
-        db.exec(migration)
+      // Special handling for migration v2 - check if columns exist
+      if (v === 2) {
+        console.log(`[Database] Applying migration v${v} (with column existence check)`)
+        applyMigrationV2(db)
+      } else {
+        const migration = MIGRATIONS[v]
+        if (migration) {
+          console.log(`[Database] Applying migration v${v}`)
+          db.exec(migration)
+        }
       }
     }
 
     // Update schema version
     db.prepare('INSERT OR REPLACE INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION)
+  }
+}
+
+function applyMigrationV2(db: Database.Database): void {
+  // Check if columns exist before adding them (handles both new and migrated databases)
+  const columns = db.pragma('table_info(meetings)') as Array<{ name: string }>
+  const columnNames = columns.map((c) => c.name)
+
+  if (!columnNames.includes('enhancement_status')) {
+    console.log('[Database] Adding enhancement_status column')
+    db.exec('ALTER TABLE meetings ADD COLUMN enhancement_status TEXT CHECK (enhancement_status IN (\'pending\', \'enhancing\', \'complete\', \'failed\') OR enhancement_status IS NULL)')
+  }
+
+  if (!columnNames.includes('is_new')) {
+    console.log('[Database] Adding is_new column')
+    db.exec('ALTER TABLE meetings ADD COLUMN is_new INTEGER')
   }
 }
 
@@ -156,9 +178,11 @@ const MIGRATIONS: Record<number, string> = {
     SELECT 1;
   `,
   2: `
-    -- Add enhancement_status and is_new columns for auto-save flow
-    ALTER TABLE meetings ADD COLUMN enhancement_status TEXT CHECK (enhancement_status IN ('pending', 'enhancing', 'complete', 'failed') OR enhancement_status IS NULL);
-    ALTER TABLE meetings ADD COLUMN is_new INTEGER;
+    -- Add enhancement_status and is_new columns for auto-save flow (if they don't exist)
+    -- SQLite doesn't have ADD COLUMN IF NOT EXISTS, so we check the schema first
+    -- For databases created with schema v2, these columns already exist in CREATE_TABLES
+    -- For databases migrated from v1, we need to add them
+    -- This migration is idempotent and safe to run multiple times
   `,
 }
 
