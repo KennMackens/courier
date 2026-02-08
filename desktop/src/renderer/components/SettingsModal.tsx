@@ -129,6 +129,7 @@ export function SettingsModal({
   const [formState, setFormState] = React.useState<Settings>(settings)
   const [activeTab, setActiveTab] = React.useState<SettingsTab>("transcription")
   const tabRefs = React.useRef<Array<HTMLButtonElement | null>>([])
+  const [confirmingDeleteId, setConfirmingDeleteId] = React.useState<string | null>(null)
 
   // Auth state
   const { user, userProfile, signOut: authSignOut } = useAuth()
@@ -139,13 +140,6 @@ export function SettingsModal({
     () => new Set(modelManager.downloadedModels.map((model) => model.modelId)),
     [modelManager.downloadedModels]
   )
-  const availableModelNames = React.useMemo(() => {
-    const map = new Map<string, string>()
-    modelManager.availableModels.forEach((model) => {
-      map.set(model.id, model.name)
-    })
-    return map
-  }, [modelManager.availableModels])
 
   const getLabel = <T extends { value: string; label: string }>(options: readonly T[], value: string) =>
     options.find((o) => o.value === value)?.label || value
@@ -196,6 +190,28 @@ export function SettingsModal({
     if (key === "theme") {
       applyTheme(value as Settings["theme"])
     }
+  }
+
+  // Handle model deletion with fallback for active model
+  const handleDeleteModel = async (modelId: string) => {
+    const isActiveModel = formState.mlxModel === modelId
+    const deleted = await modelManager.deleteModel(modelId)
+
+    if (deleted && isActiveModel) {
+      // Find another downloaded model to fallback to
+      const remainingModels = modelManager.downloadedModels.filter(
+        (m) => m.modelId !== modelId
+      )
+      if (remainingModels.length > 0) {
+        // Auto-select the first remaining model
+        updateField("mlxModel", remainingModels[0].modelId)
+      } else {
+        // No models left - clear selection (will trigger ModelRequiredBanner via isModelReady)
+        updateField("mlxModel", "")
+      }
+    }
+
+    setConfirmingDeleteId(null)
   }
 
   // Handle save
@@ -581,117 +597,193 @@ export function SettingsModal({
                   aria-labelledby="settings-tab-enhancement"
                 >
                   <div className="space-y-5">
-                    {/* Model Status */}
+                    {/* Unified Model List */}
                     <div className="space-y-3">
-                      {/* Downloaded Models List with Delete */}
-                      <div className="space-y-2">
-                        <p className="text-xs text-slate-10">
-                          Select a model to make it active:
-                        </p>
-                        {modelManager.downloadedModels.length > 0 ? (
-                          modelManager.downloadedModels.map((model) => (
+                      <p className="text-xs text-slate-10">
+                        AI models for note enhancement:
+                      </p>
+                      {modelManager.availableModels.length > 0 ? (
+                        modelManager.availableModels.map((model) => {
+                          const isInstalled = downloadedModelIds.has(model.id)
+                          const isActive = formState.mlxModel === model.id
+                          const isDownloading =
+                            modelManager.isDownloading && modelManager.downloadingModelId === model.id
+                          const isConfirmingDelete = confirmingDeleteId === model.id
+                          const sizeLabel = model.size_gb ? `~${model.size_gb} GB` : "Size unknown"
+                          const downloadedModel = modelManager.downloadedModels.find(
+                            (m) => m.modelId === model.id
+                          )
+                          const installedSizeLabel = downloadedModel?.size || sizeLabel
+
+                          return (
                             <div
-                              key={model.modelId}
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => updateField("mlxModel", model.modelId)}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter" || event.key === " ") {
-                                  event.preventDefault()
-                                  updateField("mlxModel", model.modelId)
-                                }
-                              }}
+                              key={model.id}
                               className={cn(
-                                "flex items-center justify-between p-2 rounded border transition-colors",
-                                "bg-slate-2 border-slate-5 hover:border-slate-7 cursor-pointer",
-                                formState.mlxModel === model.modelId && "border-jade-7 bg-jade-2/40"
+                                "flex flex-col gap-2 p-2 rounded border transition-colors",
+                                isActive
+                                  ? "bg-jade-2/40 border-jade-7"
+                                  : "bg-slate-2 border-slate-5"
                               )}
                             >
-                              <div className="flex-1 min-w-0">
-                                <p className="text-xs font-medium text-slate-11 truncate">
-                                  {availableModelNames.get(model.modelId) ||
-                                    model.modelId.split("/").pop()}
-                                </p>
-                                <p className="text-xs text-slate-9">{model.size}</p>
-                              </div>
-                              {formState.mlxModel === model.modelId && (
-                                <div className="flex items-center gap-1 text-xs text-jade-11 font-medium">
-                                  <CheckCircle2 className="h-3 w-3" />
-                                  Active
-                                </div>
-                              )}
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  modelManager.deleteModel(model.modelId)
-                                }}
-                                className="text-red-11 hover:text-red-12 hover:bg-red-3 ml-2"
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="text-xs text-slate-10">
-                            No downloaded models yet.
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Available Models */}
-                      <div className="space-y-2">
-                        <p className="text-xs text-slate-10">Available models:</p>
-                        {modelManager.availableModels.length > 0 ? (
-                          modelManager.availableModels.map((model) => {
-                            const isInstalled = downloadedModelIds.has(model.id)
-                            const isDownloading = modelManager.isDownloading && modelManager.downloadingModelId === model.id
-                            const sizeLabel = model.size_gb ? `~${model.size_gb} GB` : "Size unknown"
-                            return (
-                              <div
-                                key={model.id}
-                                className="flex items-center justify-between gap-3 p-2 rounded bg-slate-2 border border-slate-5"
-                              >
+                              <div className="flex items-start justify-between gap-3">
                                 <div className="flex-1 min-w-0">
-                                  <p className="text-xs font-medium text-slate-11 truncate">
-                                    {model.name}
-                                  </p>
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-xs font-medium text-slate-11 truncate">
+                                      {model.name}
+                                    </p>
+                                    {isActive && (
+                                      <span className="flex items-center gap-1 text-[11px] text-jade-11 font-medium">
+                                        <CheckCircle2 className="h-3 w-3" />
+                                        Active
+                                      </span>
+                                    )}
+                                  </div>
                                   <p className="text-xs text-slate-9 truncate">
                                     {model.description}
                                   </p>
-                                  <p className="text-[11px] text-slate-8">{sizeLabel}</p>
+                                  <p className="text-[11px] text-slate-8">
+                                    {isInstalled ? installedSizeLabel : sizeLabel}
+                                  </p>
                                 </div>
-                                <Button
-                                  type="button"
-                                  variant={isInstalled ? "outline" : "default"}
-                                  size="sm"
-                                  onClick={() => modelManager.downloadModel(model.id)}
-                                  disabled={isInstalled || modelManager.isDownloading}
-                                >
-                                  {isInstalled ? "Installed" : isDownloading ? "Downloading" : "Install"}
-                                </Button>
-                              </div>
-                            )
-                          })
-                        ) : (
-                          <div className="text-xs text-slate-10">
-                            No available models found.
-                          </div>
-                        )}
-                      </div>
 
-                      {/* Download Progress */}
-                      {modelManager.isDownloading && (
-                        <div className="space-y-2">
-                          <Progress value={modelManager.downloadProgress} className="h-2" />
-                          <div className="flex justify-between text-xs text-slate-10">
-                            <span>
-                              {modelManager.downloadedSize} / {modelManager.totalSize || "..."}
-                            </span>
-                            <span>{modelManager.downloadSpeed}</span>
-                          </div>
+                                <div className="flex items-center gap-2">
+                                  {/* Not installed: Install button */}
+                                  {!isInstalled && !isDownloading && (
+                                    <Button
+                                      type="button"
+                                      variant="default"
+                                      size="sm"
+                                      onClick={() => modelManager.downloadModel(model.id)}
+                                      disabled={modelManager.isDownloading}
+                                    >
+                                      Install
+                                    </Button>
+                                  )}
+
+                                  {/* Downloading: show Downloading button */}
+                                  {isDownloading && (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      disabled
+                                    >
+                                      Downloading
+                                    </Button>
+                                  )}
+
+                                  {/* Installed but not active: Set Active button + trash */}
+                                  {isInstalled && !isActive && !isDownloading && (
+                                    <>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => updateField("mlxModel", model.id)}
+                                      >
+                                        Set Active
+                                      </Button>
+                                      {isConfirmingDelete ? (
+                                        <div className="flex items-center gap-1 text-xs">
+                                          <span className="text-slate-11">Delete?</span>
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleDeleteModel(model.id)}
+                                            className="text-red-11 hover:text-red-12 hover:bg-red-3 px-2 h-7"
+                                          >
+                                            Yes
+                                          </Button>
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => setConfirmingDeleteId(null)}
+                                            className="text-slate-11 hover:text-slate-12 px-2 h-7"
+                                          >
+                                            No
+                                          </Button>
+                                        </div>
+                                      ) : (
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => setConfirmingDeleteId(model.id)}
+                                          className="text-red-11 hover:text-red-12 hover:bg-red-3"
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </Button>
+                                      )}
+                                    </>
+                                  )}
+
+                                  {/* Active: trash icon only */}
+                                  {isInstalled && isActive && !isDownloading && (
+                                    <>
+                                      {isConfirmingDelete ? (
+                                        <div className="flex items-center gap-1 text-xs">
+                                          <span className="text-slate-11">Delete?</span>
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleDeleteModel(model.id)}
+                                            className="text-red-11 hover:text-red-12 hover:bg-red-3 px-2 h-7"
+                                          >
+                                            Yes
+                                          </Button>
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => setConfirmingDeleteId(null)}
+                                            className="text-slate-11 hover:text-slate-12 px-2 h-7"
+                                          >
+                                            No
+                                          </Button>
+                                        </div>
+                                      ) : (
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => setConfirmingDeleteId(model.id)}
+                                          className="text-red-11 hover:text-red-12 hover:bg-red-3"
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </Button>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+
+                              {isDownloading && (
+                                <div className="space-y-1">
+                                  <div className="flex items-center justify-between text-[11px] text-slate-9">
+                                    <span>Downloading</span>
+                                    <span>
+                                      {modelManager.downloadedSize || "0.0 MB"}
+                                      {modelManager.totalSize && modelManager.totalSize !== "unknown" && modelManager.totalSize !== "0.0 MB"
+                                        ? ` / ${modelManager.totalSize}`
+                                        : ""}
+                                    </span>
+                                  </div>
+                                  <Progress
+                                    value={modelManager.downloadProgress}
+                                    indeterminate={!modelManager.totalSize || modelManager.totalSize === "unknown" || modelManager.totalSize === "0.0 MB"}
+                                    className="h-1.5"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })
+                      ) : (
+                        <div className="text-xs text-slate-10">
+                          No available models found.
                         </div>
                       )}
 
