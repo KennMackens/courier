@@ -605,7 +605,7 @@ export function SettingsModal({
                       {modelManager.availableModels.length > 0 ? (
                         modelManager.availableModels.map((model) => {
                           const isInstalled = downloadedModelIds.has(model.id)
-                          const isActive = formState.mlxModel === model.id
+                          const isActive = formState.mlxModel === model.id && isInstalled
                           const isDownloading =
                             modelManager.isDownloading && modelManager.downloadingModelId === model.id
                           const isConfirmingDelete = confirmingDeleteId === model.id
