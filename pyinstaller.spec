@@ -60,7 +60,7 @@ datas = [
 ]
 
 a = Analysis(
-    ['app/ipc_server.py'],
+    ['ipc_main.py'],
     pathex=['.'],
     binaries=[],
     datas=datas,

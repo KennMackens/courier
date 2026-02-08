@@ -10,6 +10,7 @@ import { EventEmitter } from 'events'
 import { createInterface, Interface } from 'readline'
 import { v4 as uuid } from 'uuid'
 import * as path from 'path'
+import * as fs from 'fs'
 import { app } from 'electron'
 
 // IPC Protocol types
@@ -60,6 +61,13 @@ export class PythonBridge extends EventEmitter {
   private isReady = false
   private readyPromise: Promise<void> | null = null
   private readyResolve: (() => void) | null = null
+  private logFile: fs.WriteStream | null = null
+
+  private log(msg: string): void {
+    const line = `[${new Date().toISOString()}] ${msg}\n`
+    console.log(msg)
+    this.logFile?.write(line)
+  }
 
   /**
    * Start the Python subprocess.
@@ -68,6 +76,12 @@ export class PythonBridge extends EventEmitter {
     if (this.process) {
       throw new Error('Python process already running')
     }
+
+    // Open log file for diagnostics
+    const logDir = app.getPath('logs')
+    fs.mkdirSync(logDir, { recursive: true })
+    this.logFile = fs.createWriteStream(path.join(logDir, 'python-bridge.log'), { flags: 'a' })
+    this.log(`[PythonBridge] Starting - packaged: ${app.isPackaged}`)
 
     // Create ready promise
     this.readyPromise = new Promise((resolve) => {
@@ -79,8 +93,10 @@ export class PythonBridge extends EventEmitter {
     if (app.isPackaged) {
       const backendPath = this.findBundledBackend()
       const helperPath = path.join(process.resourcesPath, 'bin', 'courier-audio-helper')
-      console.log(`[PythonBridge] Starting bundled backend: ${backendPath}`)
-      console.log(`[PythonBridge] Audio helper path: ${helperPath}`)
+      this.log(`[PythonBridge] Starting bundled backend: ${backendPath}`)
+      this.log(`[PythonBridge] Audio helper path: ${helperPath}`)
+      this.log(`[PythonBridge] Backend exists: ${fs.existsSync(backendPath)}`)
+      this.log(`[PythonBridge] Helper exists: ${fs.existsSync(helperPath)}`)
 
       this.process = spawn(backendPath, [], {
         cwd: path.dirname(backendPath),
@@ -95,8 +111,8 @@ export class PythonBridge extends EventEmitter {
       const pythonPath = this.findPythonPath()
       const appDir = this.findAppDir()
 
-      console.log(`[PythonBridge] Starting Python from ${pythonPath}`)
-      console.log(`[PythonBridge] App directory: ${appDir}`)
+      this.log(`[PythonBridge] Starting Python from ${pythonPath}`)
+      this.log(`[PythonBridge] App directory: ${appDir}`)
 
       this.process = spawn(pythonPath, ['-u', '-m', 'app.ipc_server'], {
         cwd: appDir,
@@ -118,24 +134,24 @@ export class PythonBridge extends EventEmitter {
 
     // Handle stderr (debug output)
     this.process.stderr!.on('data', (data) => {
-      console.log('[Python stderr]', data.toString().trim())
+      this.log(`[Python stderr] ${data.toString().trim()}`)
     })
 
     // Handle process exit
     this.process.on('exit', (code, signal) => {
-      console.log(`[PythonBridge] Python process exited with code ${code}, signal ${signal}`)
+      this.log(`[PythonBridge] Python process exited with code ${code}, signal ${signal}`)
       this.emit('exit', code, signal)
       this.cleanup()
     })
 
     this.process.on('error', (error) => {
-      console.error('[PythonBridge] Python process error:', error)
+      this.log(`[PythonBridge] Python process error: ${error.message}`)
       this.emit('error', error)
     })
 
     // Wait for ready notification
     await this.waitForReady()
-    console.log('[PythonBridge] Python process ready')
+    this.log('[PythonBridge] Python process ready')
   }
 
   /**
