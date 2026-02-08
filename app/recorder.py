@@ -10,6 +10,7 @@ import threading
 import struct
 import json
 import sys
+import os
 import numpy as np
 from pathlib import Path
 from typing import Optional, Callable, List
@@ -36,7 +37,13 @@ class CoreAudioTapRecorder:
         self._config = config
         self._on_error = on_error
         self._on_warning = on_warning
-        self._helper_path = Path(__file__).parent / "bin" / "courier-audio-helper"
+        # Check for bundled helper path (set by Electron in production)
+        bundled_helper = os.environ.get("OTTO_AUDIO_HELPER")
+        if bundled_helper:
+            self._helper_path = Path(bundled_helper)
+        else:
+            # Development: helper is in app/bin/
+            self._helper_path = Path(__file__).parent / "bin" / "courier-audio-helper"
 
         # Process and threading
         self._process: Optional[subprocess.Popen] = None

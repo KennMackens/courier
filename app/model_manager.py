@@ -52,7 +52,7 @@ class ModelManagerConfig:
     @staticmethod
     def default_models_dir() -> str:
         """Get default model storage path."""
-        app_support = Path.home() / "Library" / "Application Support" / "courier-desktop" / "models"
+        app_support = Path.home() / "Library" / "Application Support" / "Otto" / "models"
         return str(app_support)
 
 

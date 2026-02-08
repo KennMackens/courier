@@ -497,7 +497,7 @@ export function SettingsModal({
                           <p className="text-xs text-slate-11">
                             {micTooltip ||
                               (micStatus === "active"
-                                ? "Courier can access your microphone."
+                                ? "Otto can access your microphone."
                                 : "Open System Settings to adjust microphone permissions.")}
                           </p>
                         </div>
@@ -566,7 +566,7 @@ export function SettingsModal({
                             </div>
                             <p className="text-xs text-slate-11">
                               {systemAudioAvailable
-                                ? "Courier can record your system audio."
+                                ? "Otto can record your system audio."
                                 : "Allow Screen & System Audio Recording in System Settings."}
                             </p>
                           </div>

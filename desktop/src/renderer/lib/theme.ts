@@ -4,7 +4,7 @@
 
 export type Theme = 'light' | 'dark' | 'system'
 
-const THEME_STORAGE_KEY = 'courier-theme'
+const THEME_STORAGE_KEY = 'otto-theme'
 
 /**
  * Get the current theme preference from localStorage

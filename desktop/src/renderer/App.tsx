@@ -21,7 +21,7 @@ import { AuthScreen } from "@/components/AuthScreen"
 import { Spinner } from "@/components/ui/spinner"
 import ComponentDemo from "@/ComponentDemo"
 
-const SIDEBAR_STORAGE_KEY = 'courier-sidebar-open'
+const SIDEBAR_STORAGE_KEY = 'otto-sidebar-open'
 
 function getSidebarStoredState(): boolean {
   if (typeof window === 'undefined') return false
@@ -640,7 +640,7 @@ function App() {
                 <AlertTitle>Permission Required</AlertTitle>
                 <AlertDescription>
                   Please grant "Screen & System Audio Recording" permission in System
-                  Settings → Privacy & Security to use Courier.
+                  Settings → Privacy & Security to use Otto.
                 </AlertDescription>
               </Alert>
             </div>

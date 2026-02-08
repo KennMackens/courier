@@ -1,5 +1,5 @@
 {
-  "name": "courier-desktop",
+  "name": "otto-desktop",
   "version": "0.1.0",
   "description": "Local-first macOS meeting recorder with transcription and AI notes",
   "main": "dist/main/index.js",
@@ -58,8 +58,8 @@
     "wait-on": "^7.2.0"
   },
   "build": {
-    "appId": "com.courier.app",
-    "productName": "Courier",
+    "appId": "com.otto.app",
+    "productName": "Otto",
     "directories": {
       "output": "release"
     },
@@ -71,15 +71,26 @@
     },
     "files": [
       "dist/**/*",
-      "!node_modules/**/*"
+      "node_modules/uuid/**/*",
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/bindings/**/*",
+      "node_modules/file-uri-to-path/**/*",
+      "node_modules/firebase/**/*",
+      "node_modules/@firebase/**/*"
     ],
     "extraResources": [
       {
-        "from": "../app",
-        "to": "app",
+        "from": "build/python-backend",
+        "to": "python-backend",
         "filter": [
-          "**/*",
-          "!__pycache__/**"
+          "**/*"
+        ]
+      },
+      {
+        "from": "../app/bin",
+        "to": "bin",
+        "filter": [
+          "**/*"
         ]
       }
     ]

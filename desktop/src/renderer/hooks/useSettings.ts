@@ -42,7 +42,7 @@ export function useSettings(options: UseSettingsOptions = {}) {
         const result = await window.python.getSettings()
 
         // Merge with defaults and add theme from localStorage
-        const storedTheme = localStorage.getItem("courier-theme") as Settings["theme"] | null
+        const storedTheme = localStorage.getItem("otto-theme") as Settings["theme"] | null
 
         setSettingsState({
           ...DEFAULT_SETTINGS,
@@ -73,7 +73,7 @@ export function useSettings(options: UseSettingsOptions = {}) {
 
         // Save theme to localStorage
         if (theme) {
-          localStorage.setItem("courier-theme", theme)
+          localStorage.setItem("otto-theme", theme)
         }
 
         // Save Python settings
@@ -122,7 +122,7 @@ export function useSettings(options: UseSettingsOptions = {}) {
         recordingThreshold: DEFAULT_SETTINGS.recordingThreshold,
       })
 
-      localStorage.setItem("courier-theme", DEFAULT_SETTINGS.theme)
+      localStorage.setItem("otto-theme", DEFAULT_SETTINGS.theme)
       setSettingsState(DEFAULT_SETTINGS)
       onSaved?.()
     } catch (err) {

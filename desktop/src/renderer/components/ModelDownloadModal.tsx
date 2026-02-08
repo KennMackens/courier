@@ -76,7 +76,7 @@ export function ModelDownloadModal({
           </DialogTitle>
           {showInitialPrompt && (
             <DialogDescription>
-              To enhance your meeting notes locally, Courier needs to download an AI
+              To enhance your meeting notes locally, Otto needs to download an AI
               model. This is a one-time download.
             </DialogDescription>
           )}

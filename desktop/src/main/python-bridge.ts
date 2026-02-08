@@ -69,29 +69,44 @@ export class PythonBridge extends EventEmitter {
       throw new Error('Python process already running')
     }
 
-    // Find Python executable
-    const pythonPath = this.findPythonPath()
-
-    // Find the app directory (Python code)
-    const appDir = this.findAppDir()
-
-    console.log(`[PythonBridge] Starting Python from ${pythonPath}`)
-    console.log(`[PythonBridge] App directory: ${appDir}`)
-
     // Create ready promise
     this.readyPromise = new Promise((resolve) => {
       this.readyResolve = resolve
     })
 
-    // Spawn Python subprocess
-    this.process = spawn(pythonPath, ['-u', '-m', 'app.ipc_server'], {
-      cwd: appDir,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        PYTHONUNBUFFERED: '1',
-      },
-    })
+    // In production, use bundled PyInstaller executable
+    // In development, use system Python with -m app.ipc_server
+    if (app.isPackaged) {
+      const backendPath = this.findBundledBackend()
+      const helperPath = path.join(process.resourcesPath, 'bin', 'courier-audio-helper')
+      console.log(`[PythonBridge] Starting bundled backend: ${backendPath}`)
+      console.log(`[PythonBridge] Audio helper path: ${helperPath}`)
+
+      this.process = spawn(backendPath, [], {
+        cwd: path.dirname(backendPath),
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          OTTO_AUDIO_HELPER: helperPath,
+        },
+      })
+    } else {
+      // Development mode: use system Python
+      const pythonPath = this.findPythonPath()
+      const appDir = this.findAppDir()
+
+      console.log(`[PythonBridge] Starting Python from ${pythonPath}`)
+      console.log(`[PythonBridge] App directory: ${appDir}`)
+
+      this.process = spawn(pythonPath, ['-u', '-m', 'app.ipc_server'], {
+        cwd: appDir,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          PYTHONUNBUFFERED: '1',
+        },
+      })
+    }
 
     // Handle stdout (JSON messages)
     this.readline = createInterface({
@@ -302,21 +317,19 @@ export class PythonBridge extends EventEmitter {
     this.pendingRequests.clear()
   }
 
+  private findBundledBackend(): string {
+    // In production, use the bundled PyInstaller executable
+    return path.join(process.resourcesPath, 'python-backend', 'python-backend')
+  }
+
   private findPythonPath(): string {
-    // Try common Python paths
-    // In production, we might bundle Python or use a specific path
+    // Development: use system Python
     return process.env.PYTHON_PATH || 'python3'
   }
 
   private findAppDir(): string {
-    // In development, use the parent directory
-    // In production, use the resources directory
-    if (app.isPackaged) {
-      return path.join(process.resourcesPath, 'app')
-    } else {
-      // Development: go up from desktop/src/main to courier/
-      return path.resolve(__dirname, '..', '..', '..')
-    }
+    // Development: go up from desktop/src/main to courier/
+    return path.resolve(__dirname, '..', '..', '..')
   }
 }
 

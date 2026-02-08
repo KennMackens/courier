@@ -52,17 +52,19 @@ async function createWindow(): Promise<void> {
     console.error('[Main] Failed to initialize database:', error)
   }
 
+  // Register IPC handlers FIRST (before starting Python)
+  // This ensures handlers exist even if Python fails to start
+  registerIpcHandlers(mainWindow, python)
+  console.log('[Main] IPC handlers registered')
+
   // Start Python subprocess
   try {
     await python.start()
     console.log('[Main] Python bridge started')
-
-    // Register IPC handlers
-    registerIpcHandlers(mainWindow, python)
-    console.log('[Main] IPC handlers registered')
   } catch (error) {
     console.error('[Main] Failed to start Python bridge:', error)
     // Continue anyway - the UI can show an error state
+    // IPC handlers are already registered and will return errors appropriately
   }
 
   // Handle Python process exit

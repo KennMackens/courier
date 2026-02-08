@@ -93,7 +93,7 @@ export function AuthScreen() {
       <div className="w-full max-w-md space-y-6">
         {/* Logo/Branding */}
         <div className="text-center space-y-2">
-          <h1 className="text-3xl font-bold text-slate-12">Courier</h1>
+          <h1 className="text-3xl font-bold text-slate-12">Otto</h1>
           <p className="text-sm text-slate-11">
             Sign in to access your meeting recordings
           </p>

@@ -41,7 +41,7 @@ class MLXConfig:
     @staticmethod
     def models_directory() -> Path:
         """Get the models storage directory."""
-        return Path.home() / "Library" / "Application Support" / "courier-desktop" / "models"
+        return Path.home() / "Library" / "Application Support" / "Otto" / "models"
 
     @staticmethod
     def default_model_path() -> str:

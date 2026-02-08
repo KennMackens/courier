@@ -1,7 +1,7 @@
 /**
  * File Storage Helpers - Manage transcript and audio files.
  *
- * Files are stored in ~/Library/Application Support/Courier/sessions/[meeting-id]/
+ * Files are stored in ~/Library/Application Support/Otto/sessions/[meeting-id]/
  */
 
 import * as fs from 'fs'

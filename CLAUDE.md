@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Courier is a local-first macOS meeting recorder built with Electron + React + Python + Swift. It captures system audio and microphone using native Core Audio Taps, transcribes using local Whisper models, and generates enhanced meeting notes via local LLMs (Ollama or MLX). All processing happens locally - no cloud dependencies. Requires macOS 14.2+.
+Otto is a local-first macOS meeting recorder built with Electron + React + Python + Swift. It captures system audio and microphone using native Core Audio Taps, transcribes using local Whisper models, and generates enhanced meeting notes via local LLMs (Ollama or MLX). All processing happens locally - no cloud dependencies. Requires macOS 14.2+.
 
 ## Running the Application
 
@@ -32,7 +32,7 @@ ollama serve  # In separate terminal
 
 ## Architecture
 
-Courier uses a hybrid architecture: an Electron app for the UI, with a Python backend for ML/AI tasks.
+Otto uses a hybrid architecture: an Electron app for the UI, with a Python backend for ML/AI tasks.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -272,20 +272,20 @@ The Electron app uses a comprehensive design system based on Radix colors:
 - **Compute detection:** CUDA → MPS → CPU with int8 quantization
 - **Default language:** Dutch (nl), supports EN, DE, FR, ES, IT, PT
 - **LLM integration:**
-  - **MLX (local, default):** Apple Silicon local inference via `mlx-lm` - models stored in `~/Library/Application Support/courier-desktop/models/`
+  - **MLX (local, default):** Apple Silicon local inference via `mlx-lm` - models stored in `~/Library/Application Support/Otto/models/`
   - **Ollama (remote, fallback):** http://localhost:11434 - deprecated, available in Settings under "Advanced"
 - **Audio format:** 16kHz mono float32 required for Whisper
 - **Build:** `build_helper.sh` creates universal binary (ARM64 + x86_64)
 
 ## MLX Model Management
 
-Courier uses MLX for local LLM inference on Apple Silicon. Models are downloaded from HuggingFace and stored locally.
+Otto uses MLX for local LLM inference on Apple Silicon. Models are downloaded from HuggingFace and stored locally.
 
 ### Default Model
 
 - **Model:** `mlx-community/Qwen2.5-3B-4bit` (~2.8GB)
 - **Why Qwen2.5 3B:** Balanced quality/speed for note enhancement on Apple Silicon
-- **Storage:** `~/Library/Application Support/courier-desktop/models/`
+- **Storage:** `~/Library/Application Support/Otto/models/`
 
 ### Approved Models
 
