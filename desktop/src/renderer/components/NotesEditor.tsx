@@ -108,7 +108,7 @@ export function NotesEditor({
         ref={bodyRef}
         value={body}
         onChange={handleBodyChange}
-        placeholder="Any thoughts?"
+        placeholder="What are we meeting about?"
         disabled={disabled}
         className={cn(
           "flex-1 w-full resize-none bg-transparent text-foreground font-sans",

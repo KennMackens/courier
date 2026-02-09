@@ -471,21 +471,21 @@ export function SettingsModal({
                           )}
                         </div>
                         <div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-nowrap">
                             <p
                               className={cn(
-                                "text-sm font-semibold",
+                                "text-sm font-semibold whitespace-nowrap",
                                 micStatus === "active" ? "text-jade-12" : "text-amber-12"
                               )}
                             >
                               {micStatus === "active" && "Microphone ready"}
                               {micStatus === "denied" && "Microphone blocked"}
                               {micStatus === "not_granted" && "Permission required"}
-                              {micStatus === "unknown" && "Microphone status unknown"}
+                              {micStatus === "unknown" && "Status unknown"}
                             </p>
                               <span
                                 className={cn(
-                                  "text-[11px] px-2 py-0.5 rounded-full border",
+                                  "text-[11px] px-2 py-0.5 rounded-full border whitespace-nowrap shrink-0",
                                   micStatus === "active"
                                   ? "text-jade-11 border-jade-7 bg-jade-3"
                                   : "text-red-11 border-red-6 bg-red-3"
@@ -530,12 +530,7 @@ export function SettingsModal({
                           <span className="absolute left-0 top-0 h-full w-1 bg-amber-9" />
                         )}
                         <div className="flex items-center gap-3 pl-2">
-                          <div
-                            className={cn(
-                              "flex h-10 w-10 items-center justify-center rounded-full",
-                              systemAudioAvailable ? "bg-jade-3" : "bg-amber-4"
-                            )}
-                          >
+                          <div className="flex h-10 w-10 items-center justify-center">
                             <Volume2
                               className={cn(
                                 "h-5 w-5",

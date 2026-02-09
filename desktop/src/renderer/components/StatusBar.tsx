@@ -1,6 +1,7 @@
 import { Settings, Wifi, WifiOff, AlertCircle, History } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import logoOtto from "@/assets/otto-logo2.svg"
 
 interface StatusBarProps {
   isConnected: boolean
@@ -24,11 +25,16 @@ export function StatusBar({
   return (
     <div
       className={cn(
-        "flex items-center justify-between px-4 py-2",
+        "flex items-center justify-between px-4 py-2 relative",
         "border-b border-slate-6 bg-slate-2",
         className
       )}
     >
+      {/* Center: Otto logo */}
+      <div className="absolute left-1/2 -translate-x-1/2">
+        <img src={logoOtto} alt="Otto" className="h-5 w-5" />
+      </div>
+
       {/* Left side: Connection status */}
       <div className="flex items-center gap-4">
         {/* Connection indicator */}
