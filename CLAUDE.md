@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Otto is a local-first macOS meeting recorder built with Electron + React + Python + Swift. It captures system audio and microphone using native Core Audio Taps, transcribes using local Whisper models, and generates enhanced meeting notes via local LLMs (Ollama or MLX). All processing happens locally - no cloud dependencies. Requires macOS 14.2+.
+Otto is a local-first macOS meeting recorder built with Electron + React + Python + Swift. It captures system audio and microphone using native Core Audio Taps, transcribes using local Whisper models, and generates enhanced meeting notes via local MLX LLMs. All processing happens locally - no cloud dependencies. Requires macOS 14.2+.
 
 ## Running the Application
 
@@ -25,9 +25,6 @@ cd desktop && npm install
 cd desktop && npm run dev
 
 # First run: Grant "Screen & System Audio Recording" and "Microphone" permissions when prompted
-
-# For Ollama LLM integration (optional - can also use MLX):
-ollama serve  # In separate terminal
 ```
 
 ## Architecture
@@ -63,7 +60,8 @@ Otto uses a hybrid architecture: an Electron app for the UI, with a Python backe
 │  ipc_protocol.py  - IPC communication protocol              │
 │  recorder.py      - CoreAudioTapRecorder + mic capture      │
 │  transcriber.py   - Faster-Whisper transcription            │
-│  ollama.py        - LLM integration for notes               │
+│  mlx_inference.py - MLX LLM inference for notes             │
+│  prompts.py       - Prompt templates for note enhancement   │
 └─────────────────────────────────────────────────────────────┘
                             │
                      Subprocess (IPC)
@@ -100,7 +98,7 @@ graph TB
         Transcriber["transcriber.py"]
         ModelMgr["model_manager.py"]
         MLX["mlx_inference.py"]
-        Ollama["ollama.py (fallback)"]
+        Prompts["prompts.py"]
     end
 
     subgraph Swift["Swift Helper"]
@@ -115,7 +113,7 @@ graph TB
     IPC --> Transcriber
     IPC --> ModelMgr
     IPC --> MLX
-    IPC -.-> Ollama
+    MLX --> Prompts
     Recorder <-->|"JSON control<br/>(stdin/stdout)"| IPCHandler
     IPCHandler -.->|"Binary PCM audio<br/>(stderr)"| Recorder
     IPCHandler --> AudioCapture
@@ -226,8 +224,8 @@ sequenceDiagram
 - `recorder.py` - CoreAudioTapRecorder: manages Swift helper subprocess, audio buffering
 - `transcriber.py` - Faster-Whisper transcription pipeline
 - `model_manager.py` - HuggingFace model downloads and local model management
-- `mlx_inference.py` - Local LLM inference using Apple MLX framework (primary)
-- `ollama.py` - LLM integration for note enhancement (fallback, deprecated)
+- `mlx_inference.py` - Local LLM inference using Apple MLX framework
+- `prompts.py` - Prompt templates for note enhancement (system and user prompts)
 
 ### Swift Helper (`courier-audio-helper/`)
 
@@ -250,7 +248,7 @@ sequenceDiagram
 - **JSON-RPC for Electron ↔ Python:** Typed request/response protocol via stdin/stdout
 - **Binary audio streaming:** Size-prefixed PCM float32 over stderr (Python ↔ Swift)
 - **Callback pattern:** Functions accept `on_error`, `on_complete`, `on_progress` callbacks
-- **Config dataclasses:** AudioConfig, TranscriberConfig, OllamaConfig, MLXConfig for typed configuration
+- **Config dataclasses:** AudioConfig, TranscriberConfig, MLXConfig for typed configuration
 - **Lazy model loading:** Whisper models loaded on first transcription, then cached
 - **Graceful degradation:** If microphone unavailable, recording continues with system audio only
 
@@ -271,9 +269,7 @@ The Electron app uses a comprehensive design system based on Radix colors:
 - **Whisper models:** tiny, base, small, medium (default), large-v3
 - **Compute detection:** CUDA → MPS → CPU with int8 quantization
 - **Default language:** Dutch (nl), supports EN, DE, FR, ES, IT, PT
-- **LLM integration:**
-  - **MLX (local, default):** Apple Silicon local inference via `mlx-lm` - models stored in `~/Library/Application Support/Otto/models/`
-  - **Ollama (remote, fallback):** http://localhost:11434 - deprecated, available in Settings under "Advanced"
+- **LLM integration:** Apple Silicon local inference via `mlx-lm` - models stored in `~/Library/Application Support/Otto/models/`
 - **Audio format:** 16kHz mono float32 required for Whisper
 - **Build:** `build_helper.sh` creates universal binary (ARM64 + x86_64)
 

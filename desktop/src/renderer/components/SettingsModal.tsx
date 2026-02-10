@@ -1,5 +1,5 @@
 import * as React from "react"
-import { RefreshCw, Trash2, CheckCircle2, AlertCircle, ChevronDown, LogOut, User as UserIcon, Heart, HelpCircle, Bird, Mic, MicOff, Volume2 } from "lucide-react"
+import { Trash2, CheckCircle2, LogOut, User as UserIcon, Heart, HelpCircle, Bird, Mic, MicOff, Volume2 } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -17,13 +17,7 @@ import {
   SelectItem,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { Progress } from "@/components/ui/progress"
@@ -144,25 +138,6 @@ export function SettingsModal({
   const getLabel = <T extends { value: string; label: string }>(options: readonly T[], value: string) =>
     options.find((o) => o.value === value)?.label || value
 
-  // Ollama models state (deprecated, kept for advanced users)
-  const [ollamaModels, setOllamaModels] = React.useState<string[]>([])
-  const [isLoadingModels, setIsLoadingModels] = React.useState(false)
-  const [showAdvancedOllama, setShowAdvancedOllama] = React.useState(false)
-
-  // Fetch available Ollama models
-  const fetchOllamaModels = React.useCallback(async () => {
-    setIsLoadingModels(true)
-    try {
-      const result = await window.python.getOllamaModels()
-      setOllamaModels(result.models || [])
-    } catch (err) {
-      console.error("Failed to fetch Ollama models:", err)
-      setOllamaModels([])
-    } finally {
-      setIsLoadingModels(false)
-    }
-  }, [])
-
   // Fetch models when modal opens
   React.useEffect(() => {
     if (open) {
@@ -173,20 +148,53 @@ export function SettingsModal({
 
   // Only sync form state when modal opens, not on settings changes (to avoid resetting user edits)
   const prevOpenRef = React.useRef(false)
+  const isInitializedRef = React.useRef(false)
+  const saveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null)
+
   React.useEffect(() => {
     // Only sync when modal transitions from closed to open
     if (open && !prevOpenRef.current) {
       setFormState(settings)
       setActiveTab("transcription")
+      // Mark as not initialized yet (will be set after first render)
+      isInitializedRef.current = false
+      // Set initialized after a tick to skip the initial formState set
+      setTimeout(() => {
+        isInitializedRef.current = true
+      }, 0)
     }
     prevOpenRef.current = open
   }, [open, settings])
+
+  // Auto-save with debounce
+  React.useEffect(() => {
+    // Skip if not initialized (initial load) or modal is closed
+    if (!isInitializedRef.current || !open) return
+
+    // Clear any existing timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+    }
+
+    // Debounce save by 300ms
+    saveTimeoutRef.current = setTimeout(() => {
+      onSave(formState).catch(() => {
+        // Error is handled by the hook
+      })
+    }, 300)
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+    }
+  }, [formState, open, onSave])
 
   // Handle form field changes
   const updateField = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     setFormState((prev) => ({ ...prev, [key]: value }))
 
-    // Apply theme immediately for preview
+    // Apply theme immediately
     if (key === "theme") {
       applyTheme(value as Settings["theme"])
     }
@@ -214,35 +222,19 @@ export function SettingsModal({
     setConfirmingDeleteId(null)
   }
 
-  // Handle save
-  const handleSave = async () => {
-    try {
-      await onSave(formState)
-      onOpenChange(false)
-    } catch (err) {
+  // Handle close - save any pending changes immediately
+  const handleClose = () => {
+    // Clear any pending debounced save
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+      saveTimeoutRef.current = null
+    }
+    // Save immediately on close
+    onSave(formState).catch(() => {
       // Error is handled by the hook
-    }
-  }
-
-  // Handle cancel
-  const handleCancel = () => {
-    // Revert theme if it was changed
-    if (formState.theme !== settings.theme) {
-      applyTheme(settings.theme)
-    }
-    setFormState(settings)
+    })
     onOpenChange(false)
   }
-
-  // Validate Ollama endpoint
-  const isValidEndpoint = React.useMemo(() => {
-    try {
-      new URL(formState.ollamaEndpoint)
-      return true
-    } catch {
-      return false
-    }
-  }, [formState.ollamaEndpoint])
 
   const handleTabKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const totalTabs = SETTINGS_TABS.length
@@ -792,79 +784,6 @@ export function SettingsModal({
                       )}
                     </div>
                   </div>
-
-                  {/* Advanced Ollama Settings (Collapsed) */}
-                  <Collapsible open={showAdvancedOllama} onOpenChange={setShowAdvancedOllama}>
-                    <CollapsibleTrigger asChild>
-                      <Button variant="ghost" size="sm" className="w-full justify-between text-slate-10">
-                        <span className="text-xs">Advanced: Ollama (deprecated)</span>
-                        <ChevronDown className={cn("h-4 w-4 transition-transform", showAdvancedOllama && "rotate-180")} />
-                      </Button>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="space-y-4 pt-2">
-                      <p className="text-xs text-slate-10">
-                        Ollama is no longer required. Local MLX inference is used by default.
-                        These settings are kept for advanced users who prefer Ollama.
-                      </p>
-
-                      {/* Ollama Endpoint */}
-                      <div className="space-y-2">
-                        <Label htmlFor="ollamaEndpoint" className="text-xs text-slate-10">Ollama Endpoint</Label>
-                        <Input
-                          id="ollamaEndpoint"
-                          type="url"
-                          value={formState.ollamaEndpoint}
-                          onChange={(e) => updateField("ollamaEndpoint", e.target.value)}
-                          placeholder="http://localhost:11434"
-                          className={cn(
-                            "text-sm",
-                            !isValidEndpoint &&
-                              formState.ollamaEndpoint &&
-                              "border-red-6 focus-visible:ring-red-7"
-                          )}
-                        />
-                      </div>
-
-                      {/* Ollama Model */}
-                      <div className="space-y-2">
-                        <Label htmlFor="ollamaModel" className="text-xs text-slate-10">Ollama Model</Label>
-                        <div className="flex gap-2">
-                          <Select
-                            value={formState.ollamaModel}
-                            onValueChange={(value) => updateField("ollamaModel", value)}
-                            disabled={isLoadingModels}
-                          >
-                            <SelectTrigger id="ollamaModel" className="flex-1 text-sm">
-                              <SelectValue placeholder={isLoadingModels ? "Loading..." : "Select model"} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {ollamaModels.length > 0 ? (
-                                ollamaModels.map((model) => (
-                                  <SelectItem key={model} value={model}>
-                                    {model}
-                                  </SelectItem>
-                                ))
-                              ) : (
-                                <SelectItem value="" disabled>
-                                  {isLoadingModels ? "Loading..." : "No models available"}
-                                </SelectItem>
-                              )}
-                            </SelectContent>
-                          </Select>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            onClick={fetchOllamaModels}
-                            disabled={isLoadingModels}
-                            title="Refresh models"
-                          >
-                            <RefreshCw className={cn("h-4 w-4", isLoadingModels && "animate-spin")} />
-                          </Button>
-                        </div>
-                      </div>
-                    </CollapsibleContent>
-                  </Collapsible>
                 </div>
               )}
 
@@ -936,23 +855,17 @@ export function SettingsModal({
         )}
 
         <DialogFooter className="relative z-20">
-          <Button variant="outline" onClick={handleCancel} disabled={isSaving} className="z-20">
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSave}
-            disabled={isSaving || !isValidEndpoint || isLoading}
-            className="z-20"
-          >
-            {isSaving ? (
-              <>
-                <Spinner size="sm" className="mr-2" />
+          <div className="flex items-center gap-3">
+            {isSaving && (
+              <span className="flex items-center gap-2 text-xs text-slate-10">
+                <Spinner size="sm" />
                 Saving...
-              </>
-            ) : (
-              "Save"
+              </span>
             )}
-          </Button>
+            <Button variant="outline" onClick={handleClose} className="z-20">
+              Close
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

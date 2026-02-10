@@ -29,7 +29,6 @@ from .ipc_protocol import (
 )
 from .recorder import CoreAudioTapRecorder, AudioConfig
 from .transcriber import Transcriber, TranscriberConfig, WHISPER_MODELS
-from .ollama import OllamaClient, OllamaConfig, NotesGenerator
 from .mlx_inference import MLXConfig, MLXNotesGenerator, DEFAULT_MLX_MODEL
 from .model_manager import ModelManager, ModelManagerConfig, DownloadProgress
 
@@ -40,8 +39,6 @@ class Settings:
     language: str = "nl"
     whisper_model: str = "medium"
     mlx_model: str = DEFAULT_MLX_MODEL
-    ollama_model: str = "llama3.2"
-    ollama_endpoint: str = "http://localhost:11434"
     recording_threshold: int = 30  # Minimum recording duration in seconds
 
 
@@ -68,7 +65,6 @@ class IPCServer:
         # Pending streaming operations
         self._pending_transcription: Optional[str] = None
         self._pending_enhancement: Optional[str] = None
-        self._notes_generator: Optional[NotesGenerator] = None
         self._mlx_notes_generator: Optional[MLXNotesGenerator] = None
 
         # Model manager for MLX models
@@ -101,7 +97,6 @@ class IPCServer:
             "transcribe": self._handle_transcribe,
             "enhanceNotes": self._handle_enhance_notes,
             "resetSession": self._handle_reset_session,
-            "getOllamaModels": self._handle_get_ollama_models,
             # Model management
             "downloadModel": self._handle_download_model,
             "cancelDownload": self._handle_cancel_download,
@@ -172,9 +167,9 @@ class IPCServer:
             self.recorder = None
 
         # Stop any active enhancement
-        if self._notes_generator:
-            self._notes_generator.stop()
-            self._notes_generator = None
+        if self._mlx_notes_generator:
+            self._mlx_notes_generator.stop()
+            self._mlx_notes_generator = None
 
         self.writer.send_result(request.id, {"ok": True})
         sys.exit(0)
@@ -185,8 +180,6 @@ class IPCServer:
             "language": self.settings.language,
             "whisperModel": self.settings.whisper_model,
             "mlxModel": self.settings.mlx_model,
-            "ollamaModel": self.settings.ollama_model,
-            "ollamaEndpoint": self.settings.ollama_endpoint,
             "availableModels": [m[0] for m in WHISPER_MODELS],
             "recordingThreshold": self.settings.recording_threshold
         })
@@ -203,10 +196,6 @@ class IPCServer:
             self.settings.mlx_model = params["mlxModel"]
             # Update the cached model path
             self._mlx_model_path = self._model_manager.get_model_path(self.settings.mlx_model)
-        if "ollamaModel" in params:
-            self.settings.ollama_model = params["ollamaModel"]
-        if "ollamaEndpoint" in params:
-            self.settings.ollama_endpoint = params["ollamaEndpoint"]
         if "recordingThreshold" in params:
             self.settings.recording_threshold = params["recordingThreshold"]
 
@@ -421,13 +410,12 @@ class IPCServer:
     # --- Note enhancement handler ---
 
     def _handle_enhance_notes(self, request: Request):
-        """Enhance notes with LLM (MLX by default, Ollama as fallback)."""
+        """Enhance notes with MLX LLM."""
         params = request.params or {}
         notes = params.get("notes", "")
         transcript = params.get("transcript", self.transcript)
         language = params.get("language", self.settings.language)
         user_title = params.get("userTitle", "")
-        use_ollama = params.get("useOllama", False)  # Force Ollama if requested
 
         _debug(f"[IPC] Enhance notes request: notes={len(notes)} chars, transcript={len(transcript) if transcript else 0} chars, language={language}")
 
@@ -436,11 +424,6 @@ class IPCServer:
             _debug("[IPC] Enhancement already in progress, stopping previous request")
             self._mlx_notes_generator.stop()
             self._mlx_notes_generator = None
-
-        if self._notes_generator and self._notes_generator.is_generating():
-            _debug("[IPC] Ollama enhancement already in progress, stopping previous request")
-            self._notes_generator.stop()
-            self._notes_generator = None
 
         if not notes and not transcript:
             self.writer.send_error(
@@ -460,9 +443,7 @@ class IPCServer:
 
         def on_complete(full_response: str):
             _debug(f"Enhancement complete: {len(full_response)} chars")
-            # Clean up generator references
             self._mlx_notes_generator = None
-            self._notes_generator = None
             try:
                 self.writer.send_stream(request_id, {"complete": True}, done=True)
             except Exception as e:
@@ -472,66 +453,41 @@ class IPCServer:
         mlx_model_path = self._model_manager.get_model_path(self.settings.mlx_model)
         _debug(f"MLX model path: {mlx_model_path}")
 
-        # Try MLX first (unless Ollama explicitly requested)
-        if not use_ollama and mlx_model_path:
-            def on_mlx_error(error: str):
-                _debug(f"MLX error: {error}")
-                # Report MLX error directly - don't fall back to Ollama automatically
-                # Ollama is only used when explicitly requested via useOllama parameter
-                self.writer.send_error(request_id, ErrorCode.INTERNAL_ERROR, f"MLX enhancement failed: {error}")
+        if not mlx_model_path:
+            self.writer.send_error(
+                request_id,
+                ErrorCode.MODEL_NOT_FOUND,
+                "MLX model not found. Please download the model first."
+            )
+            return
 
-            try:
-                # Configure MLX with the selected model
-                mlx_config = MLXConfig(model_path=mlx_model_path)
-                _debug(f"Creating MLX generator with config: {mlx_config}")
+        def on_mlx_error(error: str):
+            _debug(f"MLX error: {error}")
+            self.writer.send_error(request_id, ErrorCode.INTERNAL_ERROR, f"MLX enhancement failed: {error}")
 
-                # Create and start MLX generator
-                self._mlx_notes_generator = MLXNotesGenerator(
-                    config=mlx_config,
-                    on_progress=on_token,
-                    on_complete=on_complete,
-                    on_error=on_mlx_error
-                )
+        try:
+            # Configure MLX with the selected model
+            mlx_config = MLXConfig(model_path=mlx_model_path)
+            _debug(f"Creating MLX generator with config: {mlx_config}")
 
-                _debug("Starting MLX enhancement...")
-                self._mlx_notes_generator.enhance_notes(notes, transcript, language, user_title)
+            # Create and start MLX generator
+            self._mlx_notes_generator = MLXNotesGenerator(
+                config=mlx_config,
+                on_progress=on_token,
+                on_complete=on_complete,
+                on_error=on_mlx_error
+            )
 
-                # Send acknowledgment
-                self.writer.send_stream(request_id, {"status": "started", "backend": "mlx", "model": self.settings.mlx_model}, done=False)
-            except Exception as e:
-                _debug(f"Exception in MLX setup: {e}")
-                import traceback
-                _debug(traceback.format_exc())
-                on_mlx_error(str(e))
-        else:
-            # Use Ollama
-            _debug("Using Ollama for enhancement")
-            self._enhance_with_ollama(request_id, notes, transcript, language, user_title, on_token, on_complete)
+            _debug("Starting MLX enhancement...")
+            self._mlx_notes_generator.enhance_notes(notes, transcript, language, user_title)
 
-    def _enhance_with_ollama(self, request_id: str, notes: str, transcript: str,
-                              language: str, user_title: str, on_token, on_complete):
-        """Fallback enhancement using Ollama."""
-        def on_error(error: str):
-            self.writer.send_error(request_id, ErrorCode.OLLAMA_NOT_AVAILABLE, error)
-
-        # Configure Ollama
-        ollama_config = OllamaConfig(
-            base_url=self.settings.ollama_endpoint,
-            model=self.settings.ollama_model
-        )
-
-        # Create and start generator
-        self._notes_generator = NotesGenerator(
-            config=ollama_config,
-            on_progress=on_token,
-            on_complete=on_complete,
-            on_error=on_error
-        )
-
-        self._notes_generator.enhance_notes(notes, transcript, language, user_title)
-
-        # Send acknowledgment
-        self.writer.send_stream(request_id, {"status": "started", "backend": "ollama"}, done=False)
+            # Send acknowledgment
+            self.writer.send_stream(request_id, {"status": "started", "backend": "mlx", "model": self.settings.mlx_model}, done=False)
+        except Exception as e:
+            _debug(f"Exception in MLX setup: {e}")
+            import traceback
+            _debug(traceback.format_exc())
+            on_mlx_error(str(e))
 
     # --- Session management ---
 
@@ -541,13 +497,6 @@ class IPCServer:
         self.transcript = ""
 
         self.writer.send_result(request.id, {"ok": True})
-
-    def _handle_get_ollama_models(self, request: Request):
-        """Get available Ollama models."""
-        ollama_config = OllamaConfig(base_url=self.settings.ollama_endpoint)
-        client = OllamaClient(ollama_config)
-        models = client.list_models()
-        self.writer.send_result(request.id, {"models": models})
 
     # --- Model management handlers ---
 

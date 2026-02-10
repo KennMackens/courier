@@ -4,8 +4,6 @@ export interface Settings {
   language: string
   whisperModel: string
   mlxModel: string
-  ollamaModel: string
-  ollamaEndpoint: string
   availableModels: string[]
   theme: "light" | "dark" | "system"
   recordingThreshold: number // Minimum recording duration in seconds
@@ -15,8 +13,6 @@ const DEFAULT_SETTINGS: Settings = {
   language: "nl",
   whisperModel: "medium",
   mlxModel: "mlx-community/Qwen2.5-3B-4bit",
-  ollamaModel: "llama3",
-  ollamaEndpoint: "http://localhost:11434",
   availableModels: ["tiny", "base", "small", "medium", "large-v3"],
   theme: "system",
   recordingThreshold: 30, // Default 30 seconds
@@ -117,8 +113,6 @@ export function useSettings(options: UseSettingsOptions = {}) {
         language: DEFAULT_SETTINGS.language,
         whisperModel: DEFAULT_SETTINGS.whisperModel,
         mlxModel: DEFAULT_SETTINGS.mlxModel,
-        ollamaModel: DEFAULT_SETTINGS.ollamaModel,
-        ollamaEndpoint: DEFAULT_SETTINGS.ollamaEndpoint,
         recordingThreshold: DEFAULT_SETTINGS.recordingThreshold,
       })
 
@@ -150,11 +144,6 @@ export function useSettings(options: UseSettingsOptions = {}) {
 export const LANGUAGE_OPTIONS = [
   { value: "nl", label: "Dutch" },
   { value: "en", label: "English" },
-  { value: "de", label: "German" },
-  { value: "fr", label: "French" },
-  { value: "es", label: "Spanish" },
-  { value: "it", label: "Italian" },
-  { value: "pt", label: "Portuguese" },
 ] as const
 
 // Whisper model options

@@ -31,10 +31,6 @@ export function registerIpcHandlers(
     return python.request('resetSession')
   })
 
-  ipcMain.handle('python:getOllamaModels', async () => {
-    return python.request('getOllamaModels')
-  })
-
   // --- Recording handlers ---
 
   ipcMain.handle('python:checkPermission', async () => {
@@ -134,7 +130,6 @@ export function removeIpcHandlers(): void {
     'python:getSettings',
     'python:setSettings',
     'python:resetSession',
-    'python:getOllamaModels',
     'python:checkPermission',
     'python:startRecording',
     'python:stopRecording',

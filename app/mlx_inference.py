@@ -12,8 +12,12 @@ from pathlib import Path
 from typing import Optional, Callable
 from dataclasses import dataclass, field
 
-# Import prompts from ollama module to avoid duplication
-from .ollama import ENHANCE_PROMPTS, NOTES_PROMPTS, ENHANCE_PROMPT_EN, NOTES_PROMPT_EN
+# Import prompt templates
+from .prompts import (
+    ENHANCE_PROMPTS, NOTES_PROMPTS, ENHANCE_PROMPT_EN, NOTES_PROMPT_EN,
+    ENHANCE_SYSTEM_PROMPTS, NOTES_SYSTEM_PROMPTS,
+    ENHANCE_SYSTEM_PROMPT_EN, NOTES_SYSTEM_PROMPT_EN,
+)
 
 
 def _debug(msg: str) -> None:
@@ -172,12 +176,29 @@ class MLXClient:
 
         return sampler, logits_processors
 
-    def _format_prompt(self, prompt: str) -> str:
-        """Format prompt using the model's chat template if available."""
+    def _format_prompt(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None
+    ) -> str:
+        """
+        Format prompt using the model's chat template with proper role separation.
+
+        Args:
+            prompt: The user message content
+            system_prompt: Optional system instructions (task description, format requirements)
+
+        Returns:
+            Formatted prompt string for the model
+        """
         # Try to use the tokenizer's chat template for instruct models
         if hasattr(self._tokenizer, 'apply_chat_template'):
             try:
-                messages = [{"role": "user", "content": prompt}]
+                messages = []
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                messages.append({"role": "user", "content": prompt})
+
                 formatted = self._tokenizer.apply_chat_template(
                     messages,
                     tokenize=False,
@@ -186,19 +207,25 @@ class MLXClient:
                 return formatted
             except Exception:
                 pass  # Fall back to raw prompt
+
+        # Fallback: concatenate system and user prompts
+        if system_prompt:
+            return f"{system_prompt}\n\n{prompt}"
         return prompt
 
     def generate(
         self,
         prompt: str,
-        on_token: Optional[Callable[[str], None]] = None
+        on_token: Optional[Callable[[str], None]] = None,
+        system_prompt: Optional[str] = None
     ) -> str:
         """
         Generate a response using the MLX model.
 
         Args:
-            prompt: The prompt to send
+            prompt: The user message content
             on_token: Optional callback for streaming tokens
+            system_prompt: Optional system instructions for proper role separation
 
         Returns:
             The complete generated response
@@ -212,8 +239,8 @@ class MLXClient:
             try:
                 from mlx_lm import generate as mlx_generate, stream_generate
 
-                # Format prompt using chat template if available
-                formatted_prompt = self._format_prompt(prompt)
+                # Format prompt using chat template with proper role separation
+                formatted_prompt = self._format_prompt(prompt, system_prompt)
 
                 sampler, logits_processors = self._create_sampler_and_processors()
 
@@ -352,30 +379,34 @@ class MLXNotesGenerator:
                 # Note: Don't send "Loading model..." through on_progress as it would
                 # be concatenated to the notes. The frontend handles loading state separately.
 
-            # Build title instruction based on whether user provided a title
+            # Build title instruction for system prompt
             if user_title:
-                title_instruction = f'\nUse this exact title: # {user_title}\n'
+                title_instruction = f'\nUse this exact title: # {user_title}'
             else:
                 title_instruction = ''
 
-            # Choose prompt based on whether we have user notes
+            # Choose system prompt and user content based on whether we have user notes
             if user_notes.strip():
                 # Enhance user notes with transcript
-                prompt_template = ENHANCE_PROMPTS.get(language, ENHANCE_PROMPT_EN)
-                prompt = prompt_template.format(
-                    user_notes=user_notes,
-                    transcript=transcript or "(No transcript available)",
-                    title_instruction=title_instruction
-                )
+                system_prompt = ENHANCE_SYSTEM_PROMPTS.get(language, ENHANCE_SYSTEM_PROMPT_EN)
+                if title_instruction:
+                    system_prompt = system_prompt + title_instruction
+                # User content: just the notes and transcript
+                user_content = f"""USER'S NOTES:
+{user_notes}
+
+MEETING TRANSCRIPT (may contain errors):
+{transcript or "(No transcript available)"}"""
             else:
                 # No user notes - generate from transcript only
-                prompt_template = NOTES_PROMPTS.get(language, NOTES_PROMPT_EN)
-                prompt = prompt_template.format(
-                    transcript=transcript,
-                    title_instruction=title_instruction
-                )
+                system_prompt = NOTES_SYSTEM_PROMPTS.get(language, NOTES_SYSTEM_PROMPT_EN)
+                if title_instruction:
+                    system_prompt = system_prompt + title_instruction
+                # User content: just the transcript
+                user_content = f"""TRANSCRIPT:
+{transcript}"""
 
-            # Generate with streaming
+            # Generate with streaming using proper role separation
             full_response = []
 
             def handle_token(token: str):
@@ -385,8 +416,8 @@ class MLXNotesGenerator:
                 if self.on_progress:
                     self.on_progress(token)
 
-            _debug("Starting MLX generation...")
-            self.client.generate(prompt, on_token=handle_token)
+            _debug("Starting MLX generation with system/user role separation...")
+            self.client.generate(user_content, on_token=handle_token, system_prompt=system_prompt)
             _debug(f"MLX generation finished: {len(full_response)} tokens")
 
             if self.on_complete:

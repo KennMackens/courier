@@ -5,8 +5,6 @@ export interface Settings {
   language: string
   whisperModel: string
   mlxModel: string
-  ollamaModel: string
-  ollamaEndpoint: string
   availableModels: string[]
   recordingThreshold: number // Minimum recording duration in seconds
 }
@@ -147,9 +145,6 @@ export interface PythonAPI {
   // Settings
   getSettings: () => Promise<Settings>
   setSettings: (settings: Partial<Settings>) => Promise<{ ok: boolean }>
-
-  // Ollama
-  getOllamaModels: () => Promise<{ models: string[] }>
 
   // Session
   resetSession: () => Promise<{ ok: boolean }>
