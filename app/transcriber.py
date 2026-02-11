@@ -11,6 +11,7 @@ from typing import Optional, Callable
 from dataclasses import dataclass
 
 from faster_whisper import WhisperModel
+from .constants import SUPPORTED_TRANSCRIPTION_LANGUAGE
 
 
 def _debug(msg: str) -> None:
@@ -32,7 +33,7 @@ WHISPER_MODELS = [
 class TranscriberConfig:
     """Configuration for the transcriber."""
     model_size: str = "medium"  # Use medium for good Dutch support
-    language: str = "en"
+    language: str = SUPPORTED_TRANSCRIPTION_LANGUAGE
     beam_size: int = 5
 
 
@@ -79,17 +80,21 @@ class Transcriber:
         _debug("Model loaded successfully.")
 
     def transcribe(self, audio: np.ndarray) -> str:
+        transcript, _ = self.transcribe_with_segments(audio)
+        return transcript
+
+    def transcribe_with_segments(self, audio: np.ndarray) -> tuple[str, list[dict[str, float | str]]]:
         """
-        Transcribe audio array to text.
+        Transcribe audio array to text and timestamped segments.
 
         Args:
             audio: Audio data as float32 numpy array (16kHz, mono)
 
         Returns:
-            Transcribed text
+            Tuple of transcript text and timestamped segment metadata
         """
         if len(audio) == 0:
-            return ""
+            return "", []
 
         self._load_model()
 
@@ -103,25 +108,32 @@ class Transcriber:
 
         _debug(f"Transcribing {len(audio) / 16000:.1f} seconds of audio...")
 
-        segments, info = self._model.transcribe(
+        segments, _ = self._model.transcribe(
             audio,
             language=self.config.language,
             beam_size=self.config.beam_size,
+            without_timestamps=False,
             vad_filter=True,
             vad_parameters=dict(threshold=0.5)
         )
 
         # Collect all segment texts
         texts = []
+        segment_data: list[dict[str, float | str]] = []
         for segment in segments:
             text = segment.text.strip()
             if text:
                 texts.append(text)
+                segment_data.append({
+                    "start": float(segment.start),
+                    "end": float(segment.end),
+                    "text": text,
+                })
 
         result = " ".join(texts)
         _debug(f"Transcription complete: {len(result)} characters")
 
-        return result
+        return result, segment_data
 
     def transcribe_async(
         self,

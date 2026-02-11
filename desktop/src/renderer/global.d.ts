@@ -100,6 +100,12 @@ export interface DownloadProgress {
   path?: string
 }
 
+export interface TranscriptSegment {
+  start: number
+  end: number
+  text: string
+}
+
 // System API interface
 export interface SystemAPI {
   openMicSettings: () => Promise<{ ok: boolean }>
@@ -133,6 +139,8 @@ export interface PythonAPI {
   transcribe: (params?: { language?: string; model?: string }) => Promise<{
     transcript: string
     totalTranscript: string
+    transcriptSegments?: TranscriptSegment[]
+    totalTranscriptSegments?: TranscriptSegment[]
   }>
 
   // Note enhancement
@@ -140,6 +148,7 @@ export interface PythonAPI {
     notes: string
     transcript?: string
     language?: string
+    transcriptSegments?: TranscriptSegment[]
   }) => Promise<{ complete: boolean }>
 
   // Settings

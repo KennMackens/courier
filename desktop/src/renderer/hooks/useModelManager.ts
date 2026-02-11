@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react"
 import type { AvailableModel, DownloadedModel, DownloadProgress, ModelStatus } from "@/global"
 
 // Default model for note enhancement (Apple Silicon MLX)
-export const DEFAULT_MODEL_ID = "mlx-community/Qwen2.5-3B-4bit"
+export const DEFAULT_MODEL_ID = "pdelobelle/fietje-2-chat-mlx-6Bit"
 
 export type DownloadState = "idle" | "downloading" | "complete" | "error" | "cancelled"
 
@@ -113,8 +113,12 @@ export function useModelManager(options: UseModelManagerOptions = {}) {
               downloadProgress: 100,
               isModelReady: modelIdFromEvent === modelId ? true : prev.isModelReady,
               downloadModelId: modelIdFromEvent,
+              // Optimistically add to downloaded models to prevent "Install" flash
+              downloadedModels: prev.downloadedModels.some((m) => m.modelId === modelIdFromEvent)
+                ? prev.downloadedModels
+                : [...prev.downloadedModels, { modelId: modelIdFromEvent, size: prev.totalSize || "Unknown" }],
             }))
-            loadModels()
+            loadModels() // Still refresh from backend to get accurate data
             onDownloadComplete?.()
           } else if (data.cancelled) {
             setState((prev) => ({
@@ -161,6 +165,10 @@ export function useModelManager(options: UseModelManagerOptions = {}) {
             downloadProgress: 100,
             isModelReady: downloadModelId === modelId ? true : prev.isModelReady,
             downloadModelId: downloadModelId,
+            // Optimistically add to downloaded models
+            downloadedModels: prev.downloadedModels.some((m) => m.modelId === downloadModelId)
+              ? prev.downloadedModels
+              : [...prev.downloadedModels, { modelId: downloadModelId, size: "Unknown" }],
           }))
           loadModels()
           onDownloadComplete?.()
@@ -251,6 +259,27 @@ export function useModelManager(options: UseModelManagerOptions = {}) {
       }
     }
   }, [checkModelStatus, loadModels])
+
+  // Keep model readiness in sync when downloads are triggered from another UI instance.
+  useEffect(() => {
+    const unsubscribe = window.python.onDownloadProgress((data) => {
+      if (!data.complete || !data.modelId) return
+
+      setState((prev) => ({
+        ...prev,
+        isModelReady: data.modelId === modelId ? true : prev.isModelReady,
+        downloadedModels: prev.downloadedModels.some((m) => m.modelId === data.modelId)
+          ? prev.downloadedModels
+          : [...prev.downloadedModels, { modelId: data.modelId, size: "Unknown" }],
+      }))
+
+      // Refresh with backend truth (size/status) after optimistic UI update.
+      void checkModelStatus()
+      void loadModels()
+    })
+
+    return () => unsubscribe()
+  }, [modelId, checkModelStatus, loadModels])
 
   return {
     ...state,

@@ -24,19 +24,22 @@ def _debug(msg: str) -> None:
 
 
 from .ipc_protocol import (
-    IPCReader, IPCWriter, Request, ErrorCode,
-    parse_request
+    IPCReader, IPCWriter, Request, ErrorCode
 )
 from .recorder import CoreAudioTapRecorder, AudioConfig
 from .transcriber import Transcriber, TranscriberConfig, WHISPER_MODELS
 from .mlx_inference import MLXConfig, MLXNotesGenerator, DEFAULT_MLX_MODEL
-from .model_manager import ModelManager, ModelManagerConfig, DownloadProgress
+from .model_manager import ModelManager, DownloadProgress
+from .constants import (
+    SUPPORTED_TRANSCRIPTION_LANGUAGE,
+    SUPPORTED_ENHANCEMENT_MODEL_ID,
+)
 
 
 @dataclass
 class Settings:
     """Application settings."""
-    language: str = "nl"
+    language: str = SUPPORTED_TRANSCRIPTION_LANGUAGE
     whisper_model: str = "medium"
     mlx_model: str = DEFAULT_MLX_MODEL
     recording_threshold: int = 30  # Minimum recording duration in seconds
@@ -61,6 +64,7 @@ class IPCServer:
         self.transcriber: Optional[Transcriber] = None
         self.audio_buffer: Optional[np.ndarray] = None
         self.transcript: str = ""
+        self.transcript_segments: list[dict[str, float | str]] = []
 
         # Pending streaming operations
         self._pending_transcription: Optional[str] = None
@@ -72,11 +76,6 @@ class IPCServer:
 
         # Check if MLX model is available
         self._mlx_model_path = self._model_manager.get_model_path(DEFAULT_MLX_MODEL)
-        if self._mlx_model_path is None:
-            # Try scanning for any downloaded model
-            local_models = self._model_manager.scan_local_models()
-            if local_models:
-                self._mlx_model_path = local_models[0].local_path
 
         # Path to Swift helper - use env var when bundled (set by Electron)
         bundled_helper = os.environ.get("OTTO_AUDIO_HELPER")
@@ -145,6 +144,12 @@ class IPCServer:
                 f"Method not found: {request.method}"
             )
 
+    def _is_supported_language(self, language: Any) -> bool:
+        return language == SUPPORTED_TRANSCRIPTION_LANGUAGE
+
+    def _is_supported_enhancement_model(self, model_id: Any) -> bool:
+        return model_id == SUPPORTED_ENHANCEMENT_MODEL_ID
+
     # --- Basic handlers ---
 
     def _handle_initialize(self, request: Request):
@@ -176,6 +181,10 @@ class IPCServer:
 
     def _handle_get_settings(self, request: Request):
         """Return current settings."""
+        self.settings.language = SUPPORTED_TRANSCRIPTION_LANGUAGE
+        if not self._is_supported_enhancement_model(self.settings.mlx_model):
+            self.settings.mlx_model = SUPPORTED_ENHANCEMENT_MODEL_ID
+
         self.writer.send_result(request.id, {
             "language": self.settings.language,
             "whisperModel": self.settings.whisper_model,
@@ -189,10 +198,24 @@ class IPCServer:
         params = request.params or {}
 
         if "language" in params:
+            if not self._is_supported_language(params["language"]):
+                self.writer.send_error(
+                    request.id,
+                    ErrorCode.INVALID_PARAMS,
+                    f"Transcription language must be '{SUPPORTED_TRANSCRIPTION_LANGUAGE}' (Dutch only)."
+                )
+                return
             self.settings.language = params["language"]
         if "whisperModel" in params:
             self.settings.whisper_model = params["whisperModel"]
         if "mlxModel" in params:
+            if not self._is_supported_enhancement_model(params["mlxModel"]):
+                self.writer.send_error(
+                    request.id,
+                    ErrorCode.INVALID_PARAMS,
+                    f"Enhancement model must be '{SUPPORTED_ENHANCEMENT_MODEL_ID}'."
+                )
+                return
             self.settings.mlx_model = params["mlxModel"]
             # Update the cached model path
             self._mlx_model_path = self._model_manager.get_model_path(self.settings.mlx_model)
@@ -368,6 +391,15 @@ class IPCServer:
         language = params.get("language", self.settings.language)
         model = params.get("model", self.settings.whisper_model)
 
+        if not self._is_supported_language(language):
+            self.writer.send_error(
+                request.id,
+                ErrorCode.INVALID_PARAMS,
+                f"Transcription language must be '{SUPPORTED_TRANSCRIPTION_LANGUAGE}' (Dutch only)."
+            )
+            return
+
+        language = SUPPORTED_TRANSCRIPTION_LANGUAGE
         request_id = request.id
         _debug(f"Starting transcription: language={language}, model={model}, audio_length={len(self.audio_buffer)}")
 
@@ -375,30 +407,37 @@ class IPCServer:
         config = TranscriberConfig(model_size=model, language=language)
         self.transcriber = Transcriber(config)
 
-        def on_complete(transcript: str):
+        def on_complete(transcript: str, transcript_segments: list[dict[str, float | str]]):
             _debug(f"Transcription complete: {len(transcript)} chars, first 100: {transcript[:100] if transcript else '(empty)'}")
             # Append to session transcript
             if self.transcript:
                 self.transcript += "\n\n" + transcript
+                self.transcript_segments.extend(transcript_segments)
             else:
                 self.transcript = transcript
+                self.transcript_segments = list(transcript_segments)
 
             # Send final result as stream done
             self.writer.send_stream(request_id, {
                 "transcript": transcript,
-                "totalTranscript": self.transcript
+                "totalTranscript": self.transcript,
+                "transcriptSegments": transcript_segments,
+                "totalTranscriptSegments": self.transcript_segments,
             }, done=True)
 
         def on_error(error: str):
             _debug(f"Transcription error: {error}")
             self.writer.send_error(request_id, ErrorCode.TRANSCRIPTION_ERROR, error)
 
-        # Start transcription (this already runs in background thread)
-        self.transcriber.transcribe_async(
-            self.audio_buffer,
-            on_complete=on_complete,
-            on_error=on_error
-        )
+        def transcribe_async():
+            try:
+                transcript, transcript_segments = self.transcriber.transcribe_with_segments(self.audio_buffer)
+                on_complete(transcript, transcript_segments)
+            except Exception as error:
+                on_error(str(error))
+
+        thread = threading.Thread(target=transcribe_async, daemon=True)
+        thread.start()
 
         # Send initial acknowledgment
         self.writer.send_stream(request_id, {
@@ -416,6 +455,27 @@ class IPCServer:
         transcript = params.get("transcript", self.transcript)
         language = params.get("language", self.settings.language)
         user_title = params.get("userTitle", "")
+        transcript_segments = params.get("transcriptSegments")
+
+        if not self._is_supported_language(language):
+            self.writer.send_error(
+                request.id,
+                ErrorCode.INVALID_PARAMS,
+                f"Enhancement language must be '{SUPPORTED_TRANSCRIPTION_LANGUAGE}' (Dutch only)."
+            )
+            return
+        language = SUPPORTED_TRANSCRIPTION_LANGUAGE
+
+        if not self._is_supported_enhancement_model(self.settings.mlx_model):
+            self.writer.send_error(
+                request.id,
+                ErrorCode.INVALID_PARAMS,
+                f"Enhancement model must be '{SUPPORTED_ENHANCEMENT_MODEL_ID}'."
+            )
+            return
+
+        if transcript_segments is None and transcript == self.transcript:
+            transcript_segments = self.transcript_segments
 
         _debug(f"[IPC] Enhance notes request: notes={len(notes)} chars, transcript={len(transcript) if transcript else 0} chars, language={language}")
 
@@ -479,7 +539,13 @@ class IPCServer:
             )
 
             _debug("Starting MLX enhancement...")
-            self._mlx_notes_generator.enhance_notes(notes, transcript, language, user_title)
+            self._mlx_notes_generator.enhance_notes(
+                notes,
+                transcript,
+                language,
+                user_title,
+                transcript_segments=transcript_segments,
+            )
 
             # Send acknowledgment
             self.writer.send_stream(request_id, {"status": "started", "backend": "mlx", "model": self.settings.mlx_model}, done=False)
@@ -495,6 +561,7 @@ class IPCServer:
         """Reset the current session (clear audio buffer and transcript)."""
         self.audio_buffer = None
         self.transcript = ""
+        self.transcript_segments = []
 
         self.writer.send_result(request.id, {"ok": True})
 
@@ -510,6 +577,14 @@ class IPCServer:
                 request.id,
                 ErrorCode.INVALID_PARAMS,
                 "modelId is required"
+            )
+            return
+
+        if not self._is_supported_enhancement_model(model_id):
+            self.writer.send_error(
+                request.id,
+                ErrorCode.INVALID_PARAMS,
+                f"Only model '{SUPPORTED_ENHANCEMENT_MODEL_ID}' is supported."
             )
             return
 
@@ -594,6 +669,14 @@ class IPCServer:
             )
             return
 
+        if not self._is_supported_enhancement_model(model_id):
+            self.writer.send_error(
+                request.id,
+                ErrorCode.INVALID_PARAMS,
+                f"Only model '{SUPPORTED_ENHANCEMENT_MODEL_ID}' is supported."
+            )
+            return
+
         is_downloaded = self._model_manager.is_model_downloaded(model_id)
         self.writer.send_result(request.id, {"downloaded": is_downloaded})
 
@@ -607,6 +690,14 @@ class IPCServer:
                 request.id,
                 ErrorCode.INVALID_PARAMS,
                 "modelId is required"
+            )
+            return
+
+        if not self._is_supported_enhancement_model(model_id):
+            self.writer.send_error(
+                request.id,
+                ErrorCode.INVALID_PARAMS,
+                f"Only model '{SUPPORTED_ENHANCEMENT_MODEL_ID}' is supported."
             )
             return
 
@@ -654,6 +745,14 @@ class IPCServer:
             )
             return
 
+        if not self._is_supported_enhancement_model(model_id):
+            self.writer.send_error(
+                request.id,
+                ErrorCode.INVALID_PARAMS,
+                f"Only model '{SUPPORTED_ENHANCEMENT_MODEL_ID}' is supported."
+            )
+            return
+
         deleted = self._model_manager.delete_model(model_id)
         if deleted:
             self.writer.send_result(request.id, {"deleted": True})
@@ -674,6 +773,8 @@ class IPCServer:
         models = self._model_manager.scan_local_models()
         result = []
         for info in models:
+            if not self._is_supported_enhancement_model(info.model_id):
+                continue
             size_mb = info.size_bytes / (1024 * 1024)
             result.append({
                 "modelId": info.model_id,

@@ -30,6 +30,8 @@ beforeEach(() => {
       duration INTEGER DEFAULT 0,
       transcript_path TEXT,
       audio_path TEXT,
+      enhancement_status TEXT CHECK (enhancement_status IN ('pending', 'enhancing', 'complete', 'failed') OR enhancement_status IS NULL),
+      is_new INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );

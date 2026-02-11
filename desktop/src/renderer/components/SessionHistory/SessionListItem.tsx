@@ -134,12 +134,10 @@ export function SessionListItem({
                   {`Transcribing ${Math.round(transcribeProgress)}%`}
                 </span>
               )}
-              {isEnhancing && (
+              {isEnhancing && !isEnhancementCurrent && (
                 <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-jade-3 text-jade-11 rounded">
                   <Sparkles className="h-2.5 w-2.5" />
-                  {isEnhancementCurrent
-                    ? `Enhancing${enhancementProgressPct > 0 ? ` ${Math.round(enhancementProgressPct)}%` : ""}`
-                    : "Queued"}
+                  {enhancementQueuePosition > 0 ? `Queued ${enhancementQueuePosition}` : "Queued"}
                 </span>
               )}
               {isPending && (

@@ -12,7 +12,7 @@ export interface Settings {
 const DEFAULT_SETTINGS: Settings = {
   language: "nl",
   whisperModel: "medium",
-  mlxModel: "mlx-community/Qwen2.5-3B-4bit",
+  mlxModel: "pdelobelle/fietje-2-chat-mlx-6Bit",
   availableModels: ["tiny", "base", "small", "medium", "large-v3"],
   theme: "system",
   recordingThreshold: 30, // Default 30 seconds
@@ -143,7 +143,6 @@ export function useSettings(options: UseSettingsOptions = {}) {
 // Language options
 export const LANGUAGE_OPTIONS = [
   { value: "nl", label: "Dutch" },
-  { value: "en", label: "English" },
 ] as const
 
 // Whisper model options

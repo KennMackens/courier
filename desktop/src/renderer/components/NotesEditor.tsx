@@ -9,6 +9,7 @@ interface NotesEditorProps {
   notes: string
   onNotesChange: (notes: string) => void
   disabled?: boolean
+  startRecordingDisabled?: boolean
   className?: string
   // Recording controls
   isRecording: boolean
@@ -32,6 +33,7 @@ export function NotesEditor({
   notes,
   onNotesChange,
   disabled = false,
+  startRecordingDisabled = false,
   className,
   isRecording,
   isStopping,
@@ -158,7 +160,7 @@ export function NotesEditor({
         {!isRecording && !isStopping && !isTranscribing && !hasTranscript && (
           <Button
             onClick={onStartRecording}
-            disabled={disabled}
+            disabled={disabled || startRecordingDisabled}
             variant="default"
             size="default"
           >

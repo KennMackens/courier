@@ -1,5 +1,16 @@
 import * as React from "react"
-import { Trash2, CheckCircle2, LogOut, User as UserIcon, Heart, HelpCircle, Bird, Mic, MicOff, Volume2 } from "lucide-react"
+import {
+  Trash2,
+  CheckCircle2,
+  LogOut,
+  User as UserIcon,
+  Heart,
+  HelpCircle,
+  Bird,
+  Mic,
+  MicOff,
+  Volume2,
+} from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -16,9 +27,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -27,11 +36,22 @@ import {
   LANGUAGE_OPTIONS,
   WHISPER_MODEL_OPTIONS,
   RECORDING_THRESHOLD_OPTIONS,
+  THEME_OPTIONS,
 } from "@/hooks/useSettings"
 import { useModelManager } from "@/hooks/useModelManager"
 import { useAuth } from "@/contexts/AuthContext"
 import { applyTheme } from "@/lib/theme"
 import { cn } from "@/lib/utils"
+import {
+  settingsStyles,
+  SettingsTabNav,
+  SettingsPanel,
+  SettingsSection,
+  SettingsField,
+  SettingsStatusCard,
+  type SettingsTabOption,
+  type SettingsStatusTone,
+} from "@/components/settings"
 
 interface SettingsModalProps {
   open: boolean
@@ -46,11 +66,12 @@ interface SettingsModalProps {
   onMicClick?: () => void
   isSystemAudioOnly?: boolean
   systemAudioAvailable?: boolean
+  defaultTab?: SettingsTab
 }
 
 type SettingsTab = "recording" | "transcription" | "enhancement" | "account"
 
-const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
+const SETTINGS_TABS: SettingsTabOption<SettingsTab>[] = [
   { id: "recording", label: "Recording" },
   { id: "transcription", label: "Transcription" },
   { id: "enhancement", label: "Enhancement" },
@@ -59,49 +80,57 @@ const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
 
 type AccountType = "unknown" | "early_bird" | "friend" | "paid"
 
-const accountTypeMeta: Record<AccountType, { label: string; description: string; icon: React.ReactNode; badgeClass: string; iconBg: string }> = {
+const accountTypeMeta: Record<
+  AccountType,
+  {
+    label: string
+    description: string
+    icon: React.ReactNode
+    tone: SettingsStatusTone
+    badgeLabel?: string
+  }
+> = {
   early_bird: {
     label: "Early Bird",
     description: "Free access",
     icon: <Bird className="h-5 w-5 text-amber-11" />,
-    badgeClass: "bg-amber-2 text-slate-12 border border-amber-6 shadow-md",
-    iconBg: "bg-amber-4/50",
+    tone: "warning",
+    badgeLabel: "Free",
   },
   friend: {
     label: "Friend of Otto",
     description: "Lifetime free access",
     icon: <Heart className="h-5 w-5 text-pink-11" />,
-    badgeClass: "bg-pink-2 text-slate-12 border border-pink-6 shadow-md",
-    iconBg: "bg-pink-4/50",
+    tone: "accent",
+    badgeLabel: "Lifetime",
   },
   paid: {
     label: "Paid",
     description: "Billing when available",
     icon: <UserIcon className="h-5 w-5 text-jade-11" />,
-    badgeClass: "bg-jade-2 text-slate-12 border border-jade-6 shadow-md",
-    iconBg: "bg-jade-4/50",
+    tone: "ready",
+    badgeLabel: "Paid",
   },
   unknown: {
     label: "Account type pending",
     description: "Awaiting assignment",
     icon: <HelpCircle className="h-5 w-5 text-slate-10" />,
-    badgeClass: "bg-slate-2 text-slate-11 border border-slate-6",
-    iconBg: "bg-slate-3/60",
+    tone: "neutral",
+    badgeLabel: "Pending",
   },
 }
 
 function AccountBadge({ accountType }: { accountType: AccountType }) {
   const meta = accountTypeMeta[accountType] ?? accountTypeMeta.unknown
+
   return (
-    <div className={cn("flex items-start gap-3 p-4 rounded-lg", meta.badgeClass)}>
-      <div className={cn("flex h-10 w-10 items-center justify-center rounded-full shadow-sm", meta.iconBg)}>
-        {meta.icon}
-      </div>
-      <div className="flex flex-col">
-        <p className="text-sm font-semibold text-slate-12">{meta.label}</p>
-        <p className="text-xs text-slate-10">{meta.description}</p>
-      </div>
-    </div>
+    <SettingsStatusCard
+      title={meta.label}
+      description={meta.description}
+      icon={meta.icon}
+      tone={meta.tone}
+      badgeLabel={meta.badgeLabel}
+    />
   )
 }
 
@@ -118,11 +147,11 @@ export function SettingsModal({
   onMicClick,
   isSystemAudioOnly,
   systemAudioAvailable = false,
+  defaultTab,
 }: SettingsModalProps) {
   // Local form state (for cancel behavior)
   const [formState, setFormState] = React.useState<Settings>(settings)
   const [activeTab, setActiveTab] = React.useState<SettingsTab>("transcription")
-  const tabRefs = React.useRef<Array<HTMLButtonElement | null>>([])
   const [confirmingDeleteId, setConfirmingDeleteId] = React.useState<string | null>(null)
 
   // Auth state
@@ -130,6 +159,7 @@ export function SettingsModal({
 
   // Model manager for MLX models
   const modelManager = useModelManager()
+  const { checkModelStatus, loadModels } = modelManager
   const downloadedModelIds = React.useMemo(
     () => new Set(modelManager.downloadedModels.map((model) => model.modelId)),
     [modelManager.downloadedModels]
@@ -141,10 +171,10 @@ export function SettingsModal({
   // Fetch models when modal opens
   React.useEffect(() => {
     if (open) {
-      modelManager.checkModelStatus()
-      modelManager.loadModels()
+      checkModelStatus()
+      loadModels()
     }
-  }, [open])
+  }, [open, checkModelStatus, loadModels])
 
   // Only sync form state when modal opens, not on settings changes (to avoid resetting user edits)
   const prevOpenRef = React.useRef(false)
@@ -155,7 +185,7 @@ export function SettingsModal({
     // Only sync when modal transitions from closed to open
     if (open && !prevOpenRef.current) {
       setFormState(settings)
-      setActiveTab("transcription")
+      setActiveTab(defaultTab || "transcription")
       // Mark as not initialized yet (will be set after first render)
       isInitializedRef.current = false
       // Set initialized after a tick to skip the initial formState set
@@ -164,7 +194,7 @@ export function SettingsModal({
       }, 0)
     }
     prevOpenRef.current = open
-  }, [open, settings])
+  }, [open, settings, defaultTab])
 
   // Auto-save with debounce
   React.useEffect(() => {
@@ -214,8 +244,8 @@ export function SettingsModal({
         // Auto-select the first remaining model
         updateField("mlxModel", remainingModels[0].modelId)
       } else {
-        // No models left - clear selection (will trigger ModelRequiredBanner via isModelReady)
-        updateField("mlxModel", "")
+        // Keep selected model ID so user can reinstall the same supported model
+        updateField("mlxModel", modelId)
       }
     }
 
@@ -236,45 +266,37 @@ export function SettingsModal({
     onOpenChange(false)
   }
 
-  const handleTabKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    const totalTabs = SETTINGS_TABS.length
-    if (totalTabs === 0) {
-      return
-    }
-
-    const currentIndex = Math.max(
-      0,
-      SETTINGS_TABS.findIndex((tab) => tab.id === activeTab)
-    )
-
-    let nextIndex: number | null = null
-
-    switch (event.key) {
-      case "ArrowRight":
-        nextIndex = (currentIndex + 1) % totalTabs
-        break
-      case "ArrowLeft":
-        nextIndex = (currentIndex - 1 + totalTabs) % totalTabs
-        break
-      case "Home":
-        nextIndex = 0
-        break
-      case "End":
-        nextIndex = totalTabs - 1
-        break
-      default:
-        break
-    }
-
-    if (nextIndex === null) {
-      return
-    }
-
-    event.preventDefault()
-    const nextTab = SETTINGS_TABS[nextIndex]
-    setActiveTab(nextTab.id)
-    requestAnimationFrame(() => tabRefs.current[nextIndex]?.focus())
+  const micStatusMeta: Record<
+    SettingsModalProps["micStatus"],
+    { title: string; description: string; tone: SettingsStatusTone; badge: string }
+  > = {
+    active: {
+      title: "Microphone ready",
+      description: micTooltip || "Otto can access your microphone.",
+      tone: "ready",
+      badge: "Ready",
+    },
+    denied: {
+      title: "Microphone blocked",
+      description: micTooltip || "Open System Settings to adjust microphone permissions.",
+      tone: "warning",
+      badge: "Action needed",
+    },
+    not_granted: {
+      title: "Permission required",
+      description: micTooltip || "Open System Settings to adjust microphone permissions.",
+      tone: "warning",
+      badge: "Action needed",
+    },
+    unknown: {
+      title: "Status unknown",
+      description: micTooltip || "Open System Settings to adjust microphone permissions.",
+      tone: "warning",
+      badge: "Action needed",
+    },
   }
+
+  const micMeta = micStatusMeta[micStatus]
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -282,52 +304,16 @@ export function SettingsModal({
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription className="text-sm text-slate-10">
-            Configure transcription, enhancement, appearance, and account settings.
+            Configure recording, transcription, enhancement, and account settings.
           </DialogDescription>
         </DialogHeader>
         <DialogClose />
-        <div className="px-6 border-b border-slate-6">
-          <div
-            className="flex flex-wrap items-center gap-x-8 gap-y-3"
-            role="tablist"
-            aria-label="Settings sections"
-            aria-orientation="horizontal"
-            onKeyDown={handleTabKeyDown}
-          >
-            {SETTINGS_TABS.map((tab, index) => {
-              const isActive = activeTab === tab.id
-              const tabId = `settings-tab-${tab.id}`
-              const panelId = `settings-panel-${tab.id}`
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={isActive}
-                  aria-controls={panelId}
-                  id={tabId}
-                  tabIndex={isActive ? 0 : -1}
-                  ref={(node) => {
-                    tabRefs.current[index] = node
-                  }}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={cn(
-                    "relative py-3 text-sm font-semibold tracking-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-jade-9 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-1",
-                    isActive ? "text-jade-11" : "text-slate-10 hover:text-slate-12"
-                  )}
-                >
-                  {tab.label}
-                  <span
-                    className={cn(
-                      "pointer-events-none absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-jade-9 transition-opacity",
-                      isActive ? "opacity-100" : "opacity-0"
-                    )}
-                  />
-                </button>
-              )
-            })}
-          </div>
-        </div>
+
+        <SettingsTabNav
+          tabs={SETTINGS_TABS}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+        />
 
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
@@ -335,8 +321,7 @@ export function SettingsModal({
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto">
-            <div className="space-y-6 py-4 px-6">
-              {/* Error display */}
+            <div className={settingsStyles.panelBody}>
               {error && (
                 <Alert variant="destructive">
                   <AlertDescription>{error}</AlertDescription>
@@ -344,16 +329,12 @@ export function SettingsModal({
               )}
 
               {activeTab === "transcription" && (
-                <div
-                  className="space-y-6"
-                  role="tabpanel"
-                  id="settings-panel-transcription"
-                  aria-labelledby="settings-tab-transcription"
-                >
-                  <div className="space-y-5">
-                    {/* Language */}
-                    <div className="space-y-2">
-                      <Label htmlFor="language">Language</Label>
+                <SettingsPanel tabId="transcription">
+                  <SettingsSection
+                    title="Speech & transcript defaults"
+                    description="Choose default language, Whisper model, and short-recording behavior."
+                  >
+                    <SettingsField label="Language" htmlFor="language">
                       <Select
                         value={formState.language}
                         onValueChange={(value) => updateField("language", value)}
@@ -371,11 +352,9 @@ export function SettingsModal({
                           ))}
                         </SelectContent>
                       </Select>
-                    </div>
+                    </SettingsField>
 
-                    {/* Whisper Model */}
-                    <div className="space-y-2">
-                      <Label htmlFor="whisperModel">Whisper Model</Label>
+                    <SettingsField label="Whisper Model" htmlFor="whisperModel">
                       <Select
                         value={formState.whisperModel}
                         onValueChange={(value) => updateField("whisperModel", value)}
@@ -390,19 +369,19 @@ export function SettingsModal({
                             <SelectItem key={option.value} value={option.value}>
                               <div className="flex flex-col">
                                 <span>{option.label}</span>
-                                <span className="text-xs text-slate-9">
-                                  {option.description}
-                                </span>
+                                <span className="text-xs text-slate-9">{option.description}</span>
                               </div>
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                    </div>
+                    </SettingsField>
 
-                    {/* Recording Threshold */}
-                    <div className="space-y-2">
-                      <Label htmlFor="recordingThreshold">Minimum Recording Duration</Label>
+                    <SettingsField
+                      label="Minimum Recording Duration"
+                      htmlFor="recordingThreshold"
+                      helpText="Recordings shorter than this will prompt to keep or discard."
+                    >
                       <Select
                         value={String(formState.recordingThreshold)}
                         onValueChange={(value) => updateField("recordingThreshold", Number(value))}
@@ -418,437 +397,357 @@ export function SettingsModal({
                           ))}
                         </SelectContent>
                       </Select>
-                      <p className="text-xs text-slate-10">
-                        Recordings shorter than this will prompt to keep or discard
-                      </p>
-                    </div>
-                  </div>
-                </div>
+                    </SettingsField>
+                  </SettingsSection>
+                </SettingsPanel>
               )}
 
               {activeTab === "recording" && (
-                <div
-                  className="space-y-6"
-                  role="tabpanel"
-                  id="settings-panel-recording"
-                  aria-labelledby="settings-tab-recording"
-                >
-                  <div className="space-y-3">
-                    <p className="text-sm font-semibold text-slate-12">Microphone</p>
-                    <div
-                      className={cn(
-                        "relative flex items-center justify-between p-3 rounded-lg border overflow-hidden",
-                        micStatus === "active"
-                          ? "bg-slate-1 border-slate-6"
-                          : "bg-amber-3/40 border-amber-7"
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "absolute left-0 top-0 h-full w-1",
-                          micStatus === "active" ? "bg-jade-9" : "bg-amber-9"
-                        )}
-                      />
-                      <div className="flex items-center gap-3 pl-2">
-                        <div
-                          className={cn(
-                            "flex h-10 w-10 items-center justify-center rounded-full",
-                            micStatus === "active" ? "bg-jade-4" : "bg-amber-4"
-                          )}
-                        >
-                          {micStatus === "active" ? (
-                            <Mic className="h-5 w-5 text-jade-12" />
-                          ) : (
-                            <MicOff className="h-5 w-5 text-amber-12" />
-                          )}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2 flex-nowrap">
-                            <p
-                              className={cn(
-                                "text-sm font-semibold whitespace-nowrap",
-                                micStatus === "active" ? "text-jade-12" : "text-amber-12"
-                              )}
-                            >
-                              {micStatus === "active" && "Microphone ready"}
-                              {micStatus === "denied" && "Microphone blocked"}
-                              {micStatus === "not_granted" && "Permission required"}
-                              {micStatus === "unknown" && "Status unknown"}
-                            </p>
-                              <span
-                                className={cn(
-                                  "text-[11px] px-2 py-0.5 rounded-full border whitespace-nowrap shrink-0",
-                                  micStatus === "active"
-                                  ? "text-jade-11 border-jade-7 bg-jade-3"
-                                  : "text-red-11 border-red-6 bg-red-3"
-                                )}
-                              >
-                                {micStatus === "active" ? "Ready" : "Action needed"}
-                              </span>
-                          </div>
-                          <p className="text-xs text-slate-11">
-                            {micTooltip ||
-                              (micStatus === "active"
-                                ? "Otto can access your microphone."
-                                : "Open System Settings to adjust microphone permissions.")}
-                          </p>
-                        </div>
-                      </div>
-                      {micStatus !== "active" && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={onMicClick}
-                          disabled={!onMicClick}
-                          className="relative z-10"
-                        >
-                          Open System Settings
-                        </Button>
-                      )}
-                    </div>
-
-                    <div className="space-y-3 pt-1">
-                      <p className="text-sm font-semibold text-slate-12">System Audio</p>
-                      <div
-                        className={cn(
-                          "relative flex items-center justify-between p-3 rounded-lg border overflow-hidden",
-                          systemAudioAvailable
-                            ? "bg-slate-1 border-slate-6"
-                            : "bg-amber-3/40 border-amber-7"
-                        )}
-                      >
-                        {!systemAudioAvailable && (
-                          <span className="absolute left-0 top-0 h-full w-1 bg-amber-9" />
-                        )}
-                        <div className="flex items-center gap-3 pl-2">
-                          <div className="flex h-10 w-10 items-center justify-center">
-                            <Volume2
-                              className={cn(
-                                "h-5 w-5",
-                                systemAudioAvailable ? "text-jade-12" : "text-amber-12"
-                              )}
-                            />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <p
-                                className={cn(
-                                  "text-sm font-semibold",
-                                  systemAudioAvailable ? "text-jade-12" : "text-amber-12"
-                                )}
-                              >
-                                {systemAudioAvailable ? "System audio ready" : "Permission required"}
-                              </p>
-                              <span
-                                className={cn(
-                                  "text-[11px] px-2 py-0.5 rounded-full border",
-                                  systemAudioAvailable
-                                  ? "text-jade-11 border-jade-7 bg-jade-3"
-                                  : "text-red-11 border-red-6 bg-red-3"
-                                )}
-                              >
-                                {systemAudioAvailable ? "Ready" : "Action needed"}
-                              </span>
-                            </div>
-                            <p className="text-xs text-slate-11">
-                              {systemAudioAvailable
-                                ? "Otto can record your system audio."
-                                : "Allow Screen & System Audio Recording in System Settings."}
-                            </p>
-                          </div>
-                        </div>
-                        {!systemAudioAvailable && (
+                <SettingsPanel tabId="recording">
+                  <SettingsSection
+                    title="Audio permissions"
+                    description="Otto needs microphone and system audio access before recording."
+                  >
+                    <SettingsStatusCard
+                      title={micMeta.title}
+                      description={micMeta.description}
+                      tone={micMeta.tone}
+                      badgeLabel={micMeta.badge}
+                      icon={
+                        micStatus === "active" ? (
+                          <Mic className="h-5 w-5 text-jade-12" />
+                        ) : (
+                          <MicOff className="h-5 w-5 text-amber-12" />
+                        )
+                      }
+                      action={
+                        micStatus !== "active" ? (
                           <Button
                             type="button"
                             variant="outline"
                             size="sm"
                             onClick={onMicClick}
                             disabled={!onMicClick}
-                            className="relative z-10"
                           >
                             Open System Settings
                           </Button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                        ) : undefined
+                      }
+                    />
+
+                    <SettingsStatusCard
+                      title={systemAudioAvailable ? "System audio ready" : "Permission required"}
+                      description={
+                        systemAudioAvailable
+                          ? "Otto can record your system audio."
+                          : "Allow Screen & System Audio Recording in System Settings."
+                      }
+                      tone={systemAudioAvailable ? "ready" : "warning"}
+                      badgeLabel={systemAudioAvailable ? "Ready" : "Action needed"}
+                      icon={
+                        <Volume2
+                          className={cn(
+                            "h-5 w-5",
+                            systemAudioAvailable ? "text-jade-12" : "text-amber-12"
+                          )}
+                        />
+                      }
+                      action={
+                        !systemAudioAvailable ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={onMicClick}
+                            disabled={!onMicClick}
+                          >
+                            Open System Settings
+                          </Button>
+                        ) : undefined
+                      }
+                    />
+
+                    {isSystemAudioOnly ? (
+                      <p className="text-xs text-amber-11">
+                        Recording is currently running with system audio only.
+                      </p>
+                    ) : null}
+                  </SettingsSection>
+                </SettingsPanel>
               )}
 
               {activeTab === "enhancement" && (
-                <div
-                  className="space-y-6"
-                  role="tabpanel"
-                  id="settings-panel-enhancement"
-                  aria-labelledby="settings-tab-enhancement"
-                >
-                  <div className="space-y-5">
-                    {/* Unified Model List */}
-                    <div className="space-y-3">
-                      <p className="text-xs text-slate-10">
-                        AI models for note enhancement:
-                      </p>
-                      {modelManager.availableModels.length > 0 ? (
-                        modelManager.availableModels.map((model) => {
-                          const isInstalled = downloadedModelIds.has(model.id)
-                          const isActive = formState.mlxModel === model.id && isInstalled
-                          const isDownloading =
-                            modelManager.isDownloading && modelManager.downloadingModelId === model.id
-                          const isConfirmingDelete = confirmingDeleteId === model.id
-                          const sizeLabel = model.size_gb ? `~${model.size_gb} GB` : "Size unknown"
-                          const downloadedModel = modelManager.downloadedModels.find(
-                            (m) => m.modelId === model.id
-                          )
-                          const installedSizeLabel = downloadedModel?.size || sizeLabel
+                <SettingsPanel tabId="enhancement">
+                  <SettingsSection
+                    title="Model management"
+                    description="Install and select local AI models used for note enhancement."
+                  >
+                    <div className="rounded-lg border border-slate-6 bg-white px-3 py-2 text-xs text-slate-10 dark:bg-black">
+                      Active model:{" "}
+                      <span className="font-medium text-slate-12">
+                        {modelManager.availableModels.find((model) => model.id === formState.mlxModel)?.name ||
+                          formState.mlxModel}
+                      </span>
+                    </div>
 
-                          return (
-                            <div
-                              key={model.id}
-                              className={cn(
-                                "flex flex-col gap-2 p-2 rounded border transition-colors",
-                                isActive
-                                  ? "bg-jade-2/40 border-jade-7"
-                                  : "bg-slate-2 border-slate-5"
-                              )}
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <p className="text-xs font-medium text-slate-11 truncate">
-                                      {model.name}
-                                    </p>
-                                    {isActive && (
-                                      <span className="flex items-center gap-1 text-[11px] text-jade-11 font-medium">
-                                        <CheckCircle2 className="h-3 w-3" />
-                                        Active
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="text-xs text-slate-9 truncate">
-                                    {model.description}
-                                  </p>
-                                  <p className="text-[11px] text-slate-8">
-                                    {isInstalled ? installedSizeLabel : sizeLabel}
-                                  </p>
-                                </div>
+                    {modelManager.availableModels.length > 0 ? (
+                      modelManager.availableModels.map((model) => {
+                        const isInstalled = downloadedModelIds.has(model.id)
+                        const isActive = formState.mlxModel === model.id && isInstalled
+                        const isDownloading =
+                          modelManager.isDownloading && modelManager.downloadingModelId === model.id
+                        const isConfirmingDelete = confirmingDeleteId === model.id
+                        const sizeLabel = model.size_gb ? `~${model.size_gb} GB` : "Size unknown"
+                        const downloadedModel = modelManager.downloadedModels.find(
+                          (m) => m.modelId === model.id
+                        )
+                        const installedSizeLabel = downloadedModel?.size || sizeLabel
 
+                        return (
+                          <div
+                            key={model.id}
+                            className={cn(
+                              "rounded-lg border p-3 transition-colors",
+                              isActive
+                                ? "border-jade-7 bg-white dark:bg-black"
+                                : "border-slate-6 bg-white dark:bg-black"
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2">
-                                  {/* Not installed: Install button */}
-                                  {!isInstalled && !isDownloading && (
-                                    <Button
-                                      type="button"
-                                      variant="default"
-                                      size="sm"
-                                      onClick={() => modelManager.downloadModel(model.id)}
-                                      disabled={modelManager.isDownloading}
-                                    >
-                                      Install
-                                    </Button>
-                                  )}
+                                  <p className="truncate text-sm font-medium text-slate-12">{model.name}</p>
+                                  {isActive ? (
+                                    <span className="flex items-center gap-1 text-[11px] font-medium text-jade-11">
+                                      <CheckCircle2 className="h-3 w-3" />
+                                      Active
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <p className="mt-1 truncate text-xs text-slate-10">{model.description}</p>
+                                <p className="mt-1 text-[11px] text-slate-9">
+                                  {isInstalled ? installedSizeLabel : sizeLabel}
+                                </p>
+                              </div>
 
-                                  {/* Downloading: show Downloading button */}
-                                  {isDownloading && (
+                              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                                {!isInstalled && !isDownloading ? (
+                                  <Button
+                                    type="button"
+                                    variant="default"
+                                    size="sm"
+                                    onClick={() => modelManager.downloadModel(model.id)}
+                                    disabled={modelManager.isDownloading}
+                                  >
+                                    Install
+                                  </Button>
+                                ) : null}
+
+                                {isDownloading ? (
+                                  <Button type="button" variant="outline" size="sm" disabled>
+                                    Downloading
+                                  </Button>
+                                ) : null}
+
+                                {isInstalled && !isActive && !isDownloading ? (
+                                  <>
                                     <Button
                                       type="button"
                                       variant="outline"
                                       size="sm"
-                                      disabled
+                                      onClick={() => updateField("mlxModel", model.id)}
                                     >
-                                      Downloading
+                                      Set Active
                                     </Button>
-                                  )}
-
-                                  {/* Installed but not active: Set Active button + trash */}
-                                  {isInstalled && !isActive && !isDownloading && (
-                                    <>
+                                    {isConfirmingDelete ? (
+                                      <div className="flex items-center gap-1 text-xs">
+                                        <span className="text-slate-11">Delete?</span>
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => handleDeleteModel(model.id)}
+                                          className="h-7 px-2 text-red-11 hover:bg-red-3 hover:text-red-12"
+                                        >
+                                          Yes
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => setConfirmingDeleteId(null)}
+                                          className="h-7 px-2 text-slate-11 hover:text-slate-12"
+                                        >
+                                          No
+                                        </Button>
+                                      </div>
+                                    ) : (
                                       <Button
                                         type="button"
-                                        variant="outline"
+                                        variant="ghost"
                                         size="sm"
-                                        onClick={() => updateField("mlxModel", model.id)}
+                                        onClick={() => setConfirmingDeleteId(model.id)}
+                                        className="text-red-11 hover:bg-red-3 hover:text-red-12"
                                       >
-                                        Set Active
+                                        <Trash2 className="h-3 w-3" />
                                       </Button>
-                                      {isConfirmingDelete ? (
-                                        <div className="flex items-center gap-1 text-xs">
-                                          <span className="text-slate-11">Delete?</span>
-                                          <Button
-                                            type="button"
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => handleDeleteModel(model.id)}
-                                            className="text-red-11 hover:text-red-12 hover:bg-red-3 px-2 h-7"
-                                          >
-                                            Yes
-                                          </Button>
-                                          <Button
-                                            type="button"
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => setConfirmingDeleteId(null)}
-                                            className="text-slate-11 hover:text-slate-12 px-2 h-7"
-                                          >
-                                            No
-                                          </Button>
-                                        </div>
-                                      ) : (
-                                        <Button
-                                          type="button"
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={() => setConfirmingDeleteId(model.id)}
-                                          className="text-red-11 hover:text-red-12 hover:bg-red-3"
-                                        >
-                                          <Trash2 className="h-3 w-3" />
-                                        </Button>
-                                      )}
-                                    </>
-                                  )}
+                                    )}
+                                  </>
+                                ) : null}
 
-                                  {/* Active: trash icon only */}
-                                  {isInstalled && isActive && !isDownloading && (
-                                    <>
-                                      {isConfirmingDelete ? (
-                                        <div className="flex items-center gap-1 text-xs">
-                                          <span className="text-slate-11">Delete?</span>
-                                          <Button
-                                            type="button"
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => handleDeleteModel(model.id)}
-                                            className="text-red-11 hover:text-red-12 hover:bg-red-3 px-2 h-7"
-                                          >
-                                            Yes
-                                          </Button>
-                                          <Button
-                                            type="button"
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => setConfirmingDeleteId(null)}
-                                            className="text-slate-11 hover:text-slate-12 px-2 h-7"
-                                          >
-                                            No
-                                          </Button>
-                                        </div>
-                                      ) : (
+                                {isInstalled && isActive && !isDownloading ? (
+                                  <>
+                                    {isConfirmingDelete ? (
+                                      <div className="flex items-center gap-1 text-xs">
+                                        <span className="text-slate-11">Delete?</span>
                                         <Button
                                           type="button"
                                           variant="ghost"
                                           size="sm"
-                                          onClick={() => setConfirmingDeleteId(model.id)}
-                                          className="text-red-11 hover:text-red-12 hover:bg-red-3"
+                                          onClick={() => handleDeleteModel(model.id)}
+                                          className="h-7 px-2 text-red-11 hover:bg-red-3 hover:text-red-12"
                                         >
-                                          <Trash2 className="h-3 w-3" />
+                                          Yes
                                         </Button>
-                                      )}
-                                    </>
-                                  )}
-                                </div>
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => setConfirmingDeleteId(null)}
+                                          className="h-7 px-2 text-slate-11 hover:text-slate-12"
+                                        >
+                                          No
+                                        </Button>
+                                      </div>
+                                    ) : (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => setConfirmingDeleteId(model.id)}
+                                        className="text-red-11 hover:bg-red-3 hover:text-red-12"
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                      </Button>
+                                    )}
+                                  </>
+                                ) : null}
                               </div>
-
-                              {isDownloading && (
-                                <div className="space-y-1">
-                                  <div className="flex items-center justify-between text-[11px] text-slate-9">
-                                    <span>Downloading</span>
-                                    <span>
-                                      {modelManager.downloadedSize || "0.0 MB"}
-                                      {modelManager.totalSize && modelManager.totalSize !== "unknown" && modelManager.totalSize !== "0.0 MB"
-                                        ? ` / ${modelManager.totalSize}`
-                                        : ""}
-                                    </span>
-                                  </div>
-                                  <Progress
-                                    value={modelManager.downloadProgress}
-                                    indeterminate={!modelManager.totalSize || modelManager.totalSize === "unknown" || modelManager.totalSize === "0.0 MB"}
-                                    className="h-1.5"
-                                  />
-                                </div>
-                              )}
                             </div>
-                          )
-                        })
-                      ) : (
-                        <div className="text-xs text-slate-10">
-                          No available models found.
-                        </div>
-                      )}
 
-                      {/* Download Error */}
-                      {modelManager.hasDownloadError && (
-                        <Alert variant="destructive" className="py-2">
-                          <AlertDescription className="text-xs">
-                            {modelManager.downloadError}
-                          </AlertDescription>
-                        </Alert>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                            {isDownloading ? (
+                              <div className="mt-3 space-y-1">
+                                <div className="flex items-center justify-between text-[11px] text-slate-9">
+                                  <span>Downloading</span>
+                                  <span>
+                                    {modelManager.downloadedSize || "0.0 MB"}
+                                    {modelManager.totalSize &&
+                                    modelManager.totalSize !== "unknown" &&
+                                    modelManager.totalSize !== "0.0 MB"
+                                      ? ` / ${modelManager.totalSize}`
+                                      : ""}
+                                  </span>
+                                </div>
+                                <Progress
+                                  value={modelManager.downloadProgress}
+                                  indeterminate={
+                                    !modelManager.totalSize ||
+                                    modelManager.totalSize === "unknown" ||
+                                    modelManager.totalSize === "0.0 MB"
+                                  }
+                                  className="h-1.5"
+                                />
+                              </div>
+                            ) : null}
+                          </div>
+                        )
+                      })
+                    ) : (
+                      <div className="rounded-lg border border-slate-6 bg-white px-3 py-2 text-xs text-slate-10 dark:bg-black">
+                        No available models found.
+                      </div>
+                    )}
+
+                    {modelManager.hasDownloadError ? (
+                      <Alert variant="destructive" className="py-2">
+                        <AlertDescription className="text-xs">
+                          {modelManager.downloadError}
+                        </AlertDescription>
+                      </Alert>
+                    ) : null}
+                  </SettingsSection>
+                </SettingsPanel>
               )}
 
               {activeTab === "account" && (
-                <div
-                  className="space-y-6"
-                  role="tabpanel"
-                  id="settings-panel-account"
-                  aria-labelledby="settings-tab-account"
-                >
-                  <div className="flex items-center justify-between p-3 rounded-lg border border-slate-6 bg-slate-2">
-                    <div className="space-y-1">
-                      <p className="text-sm font-semibold text-slate-12">Dark Mode</p>
-                      <p className="text-xs text-slate-10">
-                        Toggle the app theme between dark and light.
-                      </p>
-                    </div>
-                    <Switch
-                      checked={formState.theme === "dark"}
-                      onCheckedChange={(checked) => updateField("theme", checked ? "dark" : "light")}
-                      aria-label="Toggle dark mode"
-                    />
-                  </div>
+                <SettingsPanel tabId="account">
+                  <SettingsSection
+                    title="Appearance"
+                    description="Choose how Otto looks while you work."
+                  >
+                    <SettingsField
+                      label="Theme"
+                      htmlFor="theme"
+                      helpText="Use System to follow your macOS appearance preference."
+                    >
+                      <Select
+                        value={formState.theme}
+                        onValueChange={(value) => updateField("theme", value as Settings["theme"])}
+                      >
+                        <SelectTrigger id="theme">
+                          <span className="truncate text-left">
+                            {getLabel(THEME_OPTIONS, formState.theme)}
+                          </span>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {THEME_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </SettingsField>
+                  </SettingsSection>
 
-                  <h3 className="text-sm font-semibold text-slate-12">Account</h3>
-
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-slate-2 border border-slate-6">
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <SettingsSection
+                    title="Profile & access"
+                    description="Manage your account details and sign-in session."
+                  >
+                    <div className="flex items-center justify-between rounded-lg border border-slate-6 bg-white p-3 dark:bg-black">
+                      <div className="flex min-w-0 flex-1 items-center gap-3">
                         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-jade-3">
                           <UserIcon className="h-5 w-5 text-jade-11" />
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-slate-12 truncate">
-                            {userProfile?.displayName || user?.email?.split('@')[0] || 'User'}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-slate-12">
+                            {userProfile?.displayName || user?.email?.split("@")[0] || "User"}
                           </p>
-                          <p className="text-xs text-slate-10 truncate">
-                            {user?.email}
-                          </p>
+                          <p className="truncate text-xs text-slate-10">{user?.email}</p>
                         </div>
                       </div>
                     </div>
 
-                    {/* Account Type Badge */}
                     <AccountBadge accountType={userProfile?.accountType || "unknown"} />
 
-                    {/* Sign Out Button */}
                     <Button
                       type="button"
                       variant="ghost"
-                      className="w-full justify-center text-red-11 hover:text-red-12 hover:bg-red-3"
+                      className="w-full justify-center text-red-11 hover:bg-red-3 hover:text-red-12"
                       onClick={async () => {
                         try {
                           await authSignOut()
                           onOpenChange(false)
                         } catch (err) {
-                          console.error('Sign out error:', err)
+                          console.error("Sign out error:", err)
                         }
                       }}
                     >
-                      <LogOut className="h-4 w-4 mr-2" />
+                      <LogOut className="mr-2 h-4 w-4" />
                       Sign Out
                     </Button>
-                  </div>
-                </div>
+                  </SettingsSection>
+                </SettingsPanel>
               )}
             </div>
           </div>
@@ -856,12 +755,12 @@ export function SettingsModal({
 
         <DialogFooter className="relative z-20">
           <div className="flex items-center gap-3">
-            {isSaving && (
+            {isSaving ? (
               <span className="flex items-center gap-2 text-xs text-slate-10">
                 <Spinner size="sm" />
                 Saving...
               </span>
-            )}
+            ) : null}
             <Button variant="outline" onClick={handleClose} className="z-20">
               Close
             </Button>

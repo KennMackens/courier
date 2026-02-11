@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react"
 import type { EnhancementStatus } from "@/hooks/useSessionHistory"
+import type { TranscriptSegment } from "@/hooks/useTranscription"
 
 /**
  * Clean up LLM output that may contain unwanted formatting.
@@ -54,6 +55,7 @@ interface EnhancementQueueItem {
   meetingId: string
   notes: string
   transcript: string
+  transcriptSegments?: TranscriptSegment[]
   language: string
   userTitle: string
 }
@@ -144,6 +146,7 @@ export function useEnhancementQueue(options: UseEnhancementQueueOptions = {}) {
       await window.python.enhanceNotes({
         notes: nextItem.notes,
         transcript: nextItem.transcript,
+        transcriptSegments: nextItem.transcriptSegments,
         language: nextItem.language,
       })
 

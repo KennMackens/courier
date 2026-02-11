@@ -4,20 +4,24 @@
   "description": "Local-first macOS meeting recorder with transcription and AI notes",
   "main": "dist/main/index.js",
   "scripts": {
+    "predev": "npm run rebuild:electron",
     "dev": "npm run build:main && concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
     "dev:vite": "vite",
     "dev:electron": "wait-on http://localhost:5173 && electron .",
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
     "build": "npm run build:main && npm run build:renderer",
-    "build:electron": "npm run build && electron-builder",
+    "build:electron": "npm run build && electron-builder --mac",
     "preview": "vite preview",
     "type-check": "tsc --noEmit -p tsconfig.main.json",
     "lint": "eslint src/",
+    "pretest": "npm run rebuild:node",
     "test": "vitest run",
     "test:watch": "vitest",
     "postinstall": "npx @electron/rebuild -f -w better-sqlite3",
-    "rebuild": "npx @electron/rebuild -f -w better-sqlite3"
+    "rebuild": "npm run rebuild:electron",
+    "rebuild:electron": "npx @electron/rebuild -f -w better-sqlite3",
+    "rebuild:node": "npm rebuild better-sqlite3"
   },
   "dependencies": {
     "@radix-ui/react-collapsible": "^1.1.12",

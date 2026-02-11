@@ -20,6 +20,7 @@ from huggingface_hub.utils import (
     RepositoryNotFoundError,
     EntryNotFoundError,
 )
+from .constants import SUPPORTED_ENHANCEMENT_MODEL_ID
 
 
 @dataclass
@@ -510,13 +511,7 @@ class ModelManager:
         """
         curated_models = [
             {
-                "id": "mlx-community/Qwen2.5-3B-4bit",
-                "name": "Qwen 2.5 3B Instruct (4-bit)",
-                "size_gb": 2.8,
-                "description": "Balanced quality/speed for note enhancement on Apple Silicon",
-            },
-            {
-                "id": "pdelobelle/fietje-2-chat-mlx-6Bit",
+                "id": SUPPORTED_ENHANCEMENT_MODEL_ID,
                 "name": "Fietje-2 Chat (6-bit)",
                 "size_gb": 2.2,
                 "description": "Dutch-first model tuned for conversational summaries",

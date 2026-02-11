@@ -2,10 +2,18 @@ import { useState, useCallback, useEffect, useRef } from "react"
 
 export type TranscriptionStatus = "idle" | "transcribing" | "complete" | "error"
 
+export interface TranscriptSegment {
+  start: number
+  end: number
+  text: string
+}
+
 interface TranscriptionState {
   status: TranscriptionStatus
   transcript: string
   totalTranscript: string
+  transcriptSegments: TranscriptSegment[]
+  totalTranscriptSegments: TranscriptSegment[]
   progress: number
   error: string | null
 }
@@ -19,7 +27,7 @@ interface TranscriptionProgress {
 
 interface UseTranscriptionOptions {
   onProgress?: (progress: TranscriptionProgress) => void
-  onComplete?: (transcript: string) => void
+  onComplete?: (transcript: string, transcriptSegments: TranscriptSegment[]) => void
   onError?: (error: string) => void
 }
 
@@ -30,6 +38,8 @@ export function useTranscription(options: UseTranscriptionOptions = {}) {
     status: "idle",
     transcript: "",
     totalTranscript: "",
+    transcriptSegments: [],
+    totalTranscriptSegments: [],
     progress: 0,
     error: null,
   })
@@ -71,16 +81,20 @@ export function useTranscription(options: UseTranscriptionOptions = {}) {
 
       try {
         const result = await window.python.transcribe(params)
+        const transcriptSegments = result.transcriptSegments || []
+        const totalTranscriptSegments = result.totalTranscriptSegments || transcriptSegments
 
         setState((prev) => ({
           ...prev,
           status: "complete",
           transcript: result.transcript || "",
           totalTranscript: result.totalTranscript || result.transcript || "",
+          transcriptSegments,
+          totalTranscriptSegments,
           progress: 100,
         }))
 
-        onComplete?.(result.totalTranscript || result.transcript || "")
+        onComplete?.(result.totalTranscript || result.transcript || "", totalTranscriptSegments)
         return result
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Transcription failed"
@@ -114,6 +128,8 @@ export function useTranscription(options: UseTranscriptionOptions = {}) {
       status: "idle",
       transcript: "",
       totalTranscript: "",
+      transcriptSegments: [],
+      totalTranscriptSegments: [],
       progress: 0,
       error: null,
     })
@@ -125,6 +141,8 @@ export function useTranscription(options: UseTranscriptionOptions = {}) {
       ...prev,
       transcript,
       totalTranscript: transcript,
+      transcriptSegments: [],
+      totalTranscriptSegments: [],
     }))
   }, [])
 

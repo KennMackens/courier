@@ -7,17 +7,16 @@ providing the same interface as ollama.py for seamless integration.
 
 import sys
 import threading
-import os
 from pathlib import Path
 from typing import Optional, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 # Import prompt templates
 from .prompts import (
-    ENHANCE_PROMPTS, NOTES_PROMPTS, ENHANCE_PROMPT_EN, NOTES_PROMPT_EN,
     ENHANCE_SYSTEM_PROMPTS, NOTES_SYSTEM_PROMPTS,
     ENHANCE_SYSTEM_PROMPT_EN, NOTES_SYSTEM_PROMPT_EN,
 )
+from .constants import SUPPORTED_ENHANCEMENT_MODEL_ID
 
 
 def _debug(msg: str) -> None:
@@ -26,7 +25,7 @@ def _debug(msg: str) -> None:
 
 
 # Default MLX model for note enhancement (macOS Apple Silicon)
-DEFAULT_MLX_MODEL = "mlx-community/Qwen2.5-3B-4bit"
+DEFAULT_MLX_MODEL = SUPPORTED_ENHANCEMENT_MODEL_ID
 
 # Global lock to prevent concurrent MLX/Metal GPU operations
 # Metal can crash if multiple command encoders are active simultaneously
@@ -41,6 +40,10 @@ class MLXConfig:
     temperature: float = 0.7  # Sampling temperature
     top_p: float = 0.9  # Top-p (nucleus) sampling
     repetition_penalty: float = 1.1  # Penalty for repeating tokens
+    chunk_window_minutes: int = 8  # Time-based chunk size for long transcripts
+    chunk_min_duration_minutes: int = 10  # Minimum transcript duration before chunking
+    chunk_max_count: int = 24  # Guardrail: reject extremely large jobs
+    chunk_retry_attempts: int = 2  # Retry per chunk on transient failures
 
     @staticmethod
     def models_directory() -> Path:
@@ -49,7 +52,7 @@ class MLXConfig:
 
     @staticmethod
     def default_model_path() -> str:
-        """Get default model path (Qwen2.5 3B Instruct 4-bit)."""
+        """Get default model path (Fietje-2 Chat 6-bit)."""
         models_dir = MLXConfig.models_directory()
         # Convert HuggingFace model ID to directory name
         model_dir_name = DEFAULT_MLX_MODEL.replace("/", "--")
@@ -330,8 +333,9 @@ class MLXNotesGenerator:
         self,
         user_notes: str,
         transcript: str,
-        language: str = "en",
-        user_title: str = ""
+        language: str = "nl",
+        user_title: str = "",
+        transcript_segments: Optional[list[dict[str, float | str]]] = None,
     ) -> None:
         """
         Enhance user notes with transcript context in a background thread.
@@ -348,17 +352,169 @@ class MLXNotesGenerator:
         self._stop_event.clear()
         self._generation_thread = threading.Thread(
             target=self._enhance_notes_thread,
-            args=(user_notes, transcript, language, user_title),
+            args=(user_notes, transcript, language, user_title, transcript_segments),
             daemon=True
         )
         self._generation_thread.start()
+
+    def _normalize_transcript_segments(
+        self,
+        transcript_segments: Optional[list[dict[str, float | str]]]
+    ) -> list[dict[str, float | str]]:
+        """Normalize and validate transcript segment metadata."""
+        if not transcript_segments:
+            return []
+
+        normalized: list[dict[str, float | str]] = []
+        for segment in transcript_segments:
+            if not isinstance(segment, dict):
+                continue
+
+            text = str(segment.get("text", "")).strip()
+            if not text:
+                continue
+
+            try:
+                start = float(segment.get("start", 0.0))
+                end = float(segment.get("end", start))
+            except (TypeError, ValueError):
+                continue
+
+            if end < start:
+                end = start
+
+            normalized.append({
+                "start": start,
+                "end": end,
+                "text": text,
+            })
+
+        normalized.sort(key=lambda entry: float(entry["start"]))
+        return normalized
+
+    def _format_timestamp(self, seconds: float) -> str:
+        """Format seconds as HH:MM:SS or MM:SS."""
+        total_seconds = max(0, int(round(seconds)))
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, secs = divmod(remainder, 60)
+        if hours > 0:
+            return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+        return f"{minutes:02d}:{secs:02d}"
+
+    def _build_time_chunks(
+        self,
+        transcript_segments: list[dict[str, float | str]]
+    ) -> list[list[dict[str, float | str]]]:
+        """Split timestamped transcript segments into time-window chunks."""
+        if not transcript_segments:
+            return []
+
+        chunk_window_seconds = max(1, self.config.chunk_window_minutes * 60)
+        chunks: list[list[dict[str, float | str]]] = []
+        current_chunk: list[dict[str, float | str]] = []
+        current_chunk_start = float(transcript_segments[0]["start"])
+
+        for segment in transcript_segments:
+            if self._stop_event.is_set():
+                raise InterruptedError("Generation cancelled")
+
+            segment_start = float(segment["start"])
+            segment_end = float(segment["end"])
+
+            if not current_chunk:
+                current_chunk = [segment]
+                current_chunk_start = segment_start
+                continue
+
+            if segment_end - current_chunk_start <= chunk_window_seconds:
+                current_chunk.append(segment)
+            else:
+                chunks.append(current_chunk)
+                current_chunk = [segment]
+                current_chunk_start = segment_start
+
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        if len(chunks) > self.config.chunk_max_count:
+            raise RuntimeError(
+                f"Transcript produced {len(chunks)} chunks, exceeding limit of {self.config.chunk_max_count}."
+            )
+
+        return chunks
+
+    def _summarize_chunk(
+        self,
+        chunk: list[dict[str, float | str]],
+        chunk_index: int,
+        total_chunks: int,
+        language: str,
+    ) -> str:
+        """Generate a compact summary for one transcript chunk."""
+        chunk_lines = []
+        for segment in chunk:
+            timestamp = self._format_timestamp(float(segment["start"]))
+            chunk_lines.append(f"[{timestamp}] {segment['text']}")
+        chunk_transcript = "\n".join(chunk_lines)
+
+        start_label = self._format_timestamp(float(chunk[0]["start"]))
+        end_label = self._format_timestamp(float(chunk[-1]["end"]))
+
+        if language == "nl":
+            chunk_prompt = f"""Maak een compacte samenvatting van dit transcript-fragment voor latere aggregatie.
+Geef alleen markdown bullet points met:
+- Belangrijkste punten
+- Beslissingen
+- Actiepunten
+- Open vragen (indien aanwezig)
+
+Fragment {chunk_index}/{total_chunks}
+Tijd: {start_label} - {end_label}
+
+TRANSCRIPT:
+{chunk_transcript}"""
+        else:
+            chunk_prompt = f"""Create a compact summary of this transcript chunk for downstream aggregation.
+Return markdown bullet points only with:
+- Key points
+- Decisions
+- Action items
+- Open questions (if any)
+
+Chunk {chunk_index}/{total_chunks}
+Time: {start_label} - {end_label}
+
+TRANSCRIPT:
+{chunk_transcript}"""
+
+        system_prompt = NOTES_SYSTEM_PROMPTS.get(language, NOTES_SYSTEM_PROMPT_EN)
+        attempts = max(1, self.config.chunk_retry_attempts)
+        last_error: Optional[Exception] = None
+
+        for attempt in range(1, attempts + 1):
+            try:
+                summary = self.client.generate(chunk_prompt, system_prompt=system_prompt).strip()
+                if summary:
+                    return summary
+                raise RuntimeError("Chunk summary was empty")
+            except Exception as error:
+                last_error = error
+                _debug(
+                    f"Chunk {chunk_index}/{total_chunks} summarization failed "
+                    f"(attempt {attempt}/{attempts}): {error}"
+                )
+
+        raise RuntimeError(
+            f"Failed to summarize chunk {chunk_index}/{total_chunks}: {last_error}"
+        )
 
     def _enhance_notes_thread(
         self,
         user_notes: str,
         transcript: str,
         language: str,
-        user_title: str = ""
+        user_title: str = "",
+        transcript_segments: Optional[list[dict[str, float | str]]] = None,
     ) -> None:
         """Background thread for note enhancement."""
         try:
@@ -379,33 +535,6 @@ class MLXNotesGenerator:
                 # Note: Don't send "Loading model..." through on_progress as it would
                 # be concatenated to the notes. The frontend handles loading state separately.
 
-            # Build title instruction for system prompt
-            if user_title:
-                title_instruction = f'\nUse this exact title: # {user_title}'
-            else:
-                title_instruction = ''
-
-            # Choose system prompt and user content based on whether we have user notes
-            if user_notes.strip():
-                # Enhance user notes with transcript
-                system_prompt = ENHANCE_SYSTEM_PROMPTS.get(language, ENHANCE_SYSTEM_PROMPT_EN)
-                if title_instruction:
-                    system_prompt = system_prompt + title_instruction
-                # User content: just the notes and transcript
-                user_content = f"""USER'S NOTES:
-{user_notes}
-
-MEETING TRANSCRIPT (may contain errors):
-{transcript or "(No transcript available)"}"""
-            else:
-                # No user notes - generate from transcript only
-                system_prompt = NOTES_SYSTEM_PROMPTS.get(language, NOTES_SYSTEM_PROMPT_EN)
-                if title_instruction:
-                    system_prompt = system_prompt + title_instruction
-                # User content: just the transcript
-                user_content = f"""TRANSCRIPT:
-{transcript}"""
-
             # Generate with streaming using proper role separation
             full_response = []
 
@@ -415,6 +544,72 @@ MEETING TRANSCRIPT (may contain errors):
                 full_response.append(token)
                 if self.on_progress:
                     self.on_progress(token)
+
+            # Build title instruction for system prompt
+            if user_title:
+                title_instruction = f'\nUse this exact title: # {user_title}'
+            else:
+                title_instruction = ''
+
+            normalized_segments = self._normalize_transcript_segments(transcript_segments)
+            should_chunk = False
+            if normalized_segments:
+                total_duration_seconds = float(normalized_segments[-1]["end"]) - float(normalized_segments[0]["start"])
+                chunk_threshold_seconds = self.config.chunk_min_duration_minutes * 60
+                should_chunk = total_duration_seconds >= chunk_threshold_seconds
+
+            if should_chunk:
+                _debug(
+                    f"Using timestamp-based chunked summarization pipeline "
+                    f"({len(normalized_segments)} segments)"
+                )
+                chunks = self._build_time_chunks(normalized_segments)
+                chunk_summaries: list[str] = []
+                total_chunks = len(chunks)
+
+                for index, chunk in enumerate(chunks, start=1):
+                    if self._stop_event.is_set():
+                        raise InterruptedError("Generation cancelled")
+                    chunk_summary = self._summarize_chunk(chunk, index, total_chunks, language)
+                    chunk_summaries.append(f"## Chunk {index}\n{chunk_summary}")
+
+                summaries_block = "\n\n".join(chunk_summaries)
+                if user_notes.strip():
+                    system_prompt = ENHANCE_SYSTEM_PROMPTS.get(language, ENHANCE_SYSTEM_PROMPT_EN)
+                    if title_instruction:
+                        system_prompt = system_prompt + title_instruction
+                    user_content = f"""USER'S NOTES:
+{user_notes}
+
+CHUNK SUMMARIES (chronological):
+{summaries_block}"""
+                else:
+                    system_prompt = NOTES_SYSTEM_PROMPTS.get(language, NOTES_SYSTEM_PROMPT_EN)
+                    if title_instruction:
+                        system_prompt = system_prompt + title_instruction
+                    user_content = f"""CHUNK SUMMARIES (chronological):
+{summaries_block}"""
+            else:
+                # Choose system prompt and user content based on whether we have user notes
+                if user_notes.strip():
+                    # Enhance user notes with transcript
+                    system_prompt = ENHANCE_SYSTEM_PROMPTS.get(language, ENHANCE_SYSTEM_PROMPT_EN)
+                    if title_instruction:
+                        system_prompt = system_prompt + title_instruction
+                    # User content: just the notes and transcript
+                    user_content = f"""USER'S NOTES:
+{user_notes}
+
+MEETING TRANSCRIPT (may contain errors):
+{transcript or "(No transcript available)"}"""
+                else:
+                    # No user notes - generate from transcript only
+                    system_prompt = NOTES_SYSTEM_PROMPTS.get(language, NOTES_SYSTEM_PROMPT_EN)
+                    if title_instruction:
+                        system_prompt = system_prompt + title_instruction
+                    # User content: just the transcript
+                    user_content = f"""TRANSCRIPT:
+{transcript}"""
 
             _debug("Starting MLX generation with system/user role separation...")
             self.client.generate(user_content, on_token=handle_token, system_prompt=system_prompt)
@@ -432,7 +627,7 @@ MEETING TRANSCRIPT (may contain errors):
             if self.on_error:
                 self.on_error(str(e))
 
-    def generate_notes(self, transcript: str, language: str = "en") -> None:
+    def generate_notes(self, transcript: str, language: str = "nl") -> None:
         """
         Generate notes from transcript only (legacy method).
 

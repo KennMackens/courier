@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react"
+import type { TranscriptSegment } from "@/hooks/useTranscription"
 
 export type EnhancementStatus = "idle" | "enhancing" | "complete" | "error"
 
@@ -47,7 +48,13 @@ export function useNotesEnhancement(options: UseNotesEnhancementOptions = {}) {
 
   // Enhance notes
   const enhanceNotes = useCallback(
-    async (params: { notes: string; transcript?: string; language?: string; userTitle?: string }) => {
+    async (params: {
+      notes: string
+      transcript?: string
+      transcriptSegments?: TranscriptSegment[]
+      language?: string
+      userTitle?: string
+    }) => {
       // Reset accumulated notes
       enhancedNotesRef.current = ""
 

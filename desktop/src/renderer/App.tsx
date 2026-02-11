@@ -82,17 +82,20 @@ function App() {
 
   // UI state
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsDefaultTab, setSettingsDefaultTab] = useState<"recording" | "transcription" | "enhancement" | "account" | undefined>(undefined)
   const [downloadModalOpen, setDownloadModalOpen] = useState(false)
   const [discardModalOpen, setDiscardModalOpen] = useState(false)
   const [notes, setNotes] = useState("")
   const [toasts, setToasts] = useState<ToastState[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(() => getSidebarStoredState())
+  const toastIdCounterRef = useRef(0)
 
   // Pending enhancement to execute after model download
   const pendingEnhancementRef = useRef<{
     meetingId: string
     notes: string
     transcript: string
+    transcriptSegments: { start: number; end: number; text: string }[]
     language: string
     userTitle: string
   } | null>(null)
@@ -142,7 +145,7 @@ function App() {
   })
 
   const transcription = useTranscription({
-    onComplete: async (transcript: string) => {
+    onComplete: async (transcript: string, transcriptSegments) => {
       // Use ref to get current meeting ID (avoids stale closure)
       const meetingId = currentMeetingIdRef.current
 
@@ -183,6 +186,7 @@ function App() {
             meetingId: meetingId,
             notes: originalNotes,
             transcript: transcript,
+            transcriptSegments,
             language: settings.settings.language,
             userTitle,
           }
@@ -330,7 +334,7 @@ function App() {
   // Toast helper
   const showToast = useCallback(
     (title: string, description: string, variant: ToastState["variant"] = "default", onClick?: () => void) => {
-      const id = Date.now().toString()
+      const id = `${Date.now()}-${toastIdCounterRef.current++}`
       setToasts((prev) => [...prev, { id, title, description, variant, onClick }])
 
       // Auto-dismiss after 5 seconds (unless user clicks)
@@ -615,6 +619,7 @@ function App() {
 
   // Compute derived state
   const isDisabled = !connectionStatus.connected
+  const isRecordingBlockedByModel = !modelManager.isModelReady
   const currentError = recording.error || transcription.error || enhancement.error
 
   return (
@@ -685,21 +690,44 @@ function App() {
             />
           ) : (
             /* Notes Editor with integrated recording controls */
-            <NotesEditor
-              notes={notes}
-              onNotesChange={setNotes}
-              disabled={isDisabled}
-              isRecording={recording.isRecording}
-              isStopping={recording.isStopping}
-              isTranscribing={transcription.isTranscribing}
-              duration={recording.duration}
-              hasTranscript={transcription.totalTranscript.length > 0}
-              onStartRecording={handleStartRecording}
-              onStopRecording={recording.stopRecording}
-              micStatus={recording.micStatus}
-              micWarning={recording.micWarning}
-              className="flex-1 p-6"
-            />
+            <div className="flex-1 flex flex-col min-h-0">
+              {!isDisabled && isRecordingBlockedByModel && (
+                <div className="px-6 pt-4">
+                  <Alert variant="info">
+                    <AlertTitle>Model required</AlertTitle>
+                    <AlertDescription className="flex items-center justify-between gap-3">
+                      <span>Download an AI model to start recording.</span>
+                      <button
+                        type="button"
+                        className="text-jade-11 hover:text-jade-12 font-medium underline"
+                        onClick={() => {
+                          setSettingsDefaultTab("enhancement")
+                          setSettingsOpen(true)
+                        }}
+                      >
+                        Go to Settings
+                      </button>
+                    </AlertDescription>
+                  </Alert>
+                </div>
+              )}
+              <NotesEditor
+                notes={notes}
+                onNotesChange={setNotes}
+                disabled={isDisabled}
+                startRecordingDisabled={isRecordingBlockedByModel}
+                isRecording={recording.isRecording}
+                isStopping={recording.isStopping}
+                isTranscribing={transcription.isTranscribing}
+                duration={recording.duration}
+                hasTranscript={transcription.totalTranscript.length > 0}
+                onStartRecording={handleStartRecording}
+                onStopRecording={recording.stopRecording}
+                micStatus={recording.micStatus}
+                micWarning={recording.micWarning}
+                className="flex-1 p-6"
+              />
+            </div>
           )}
         </main>
 
@@ -722,12 +750,18 @@ function App() {
       {/* Settings Modal */}
       <SettingsModal
         open={settingsOpen}
-        onOpenChange={setSettingsOpen}
+        onOpenChange={(open) => {
+          setSettingsOpen(open)
+          if (!open) {
+            setSettingsDefaultTab(undefined)
+          }
+        }}
         settings={settings.settings}
         isLoading={settings.isLoading}
         isSaving={settings.isSaving}
         error={settings.error}
         onSave={settings.saveSettings}
+        defaultTab={settingsDefaultTab}
         micStatus={recording.micStatus || (permissionGranted ? "active" : "not_granted")}
         micTooltip={recording.micWarning}
         onMicClick={() => window.system?.openMicSettings()}
