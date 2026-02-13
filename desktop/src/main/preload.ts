@@ -14,6 +14,7 @@ export interface Settings {
   mlxModel: string
   availableModels: string[]
   recordingThreshold: number
+  performanceMode: 'balanced' | 'low_cpu'
 }
 
 // Database types
@@ -62,43 +63,6 @@ export interface MeetingListOptions {
   search?: string
 }
 
-// Model management types
-export interface AvailableModel {
-  id: string
-  name: string
-  size_gb: number
-  description: string
-}
-
-export interface DownloadedModel {
-  modelId: string
-  path: string
-  size: string
-  sizeBytes: number
-  downloadDate: string | null
-}
-
-export interface ModelStatus {
-  exists: boolean
-  modelId: string
-  path?: string
-  size?: string
-  sizeBytes?: number
-  downloadDate?: string | null
-  version?: string | null
-}
-
-export interface DownloadProgress {
-  status: string
-  progress?: number
-  downloaded?: string
-  total?: string
-  speed?: string
-  complete?: boolean
-  cancelled?: boolean
-  path?: string
-}
-
 export interface TranscriptSegment {
   start: number
   end: number
@@ -137,14 +101,6 @@ export interface PythonAPI {
     totalTranscriptSegments?: TranscriptSegment[]
   }>
 
-  // Note enhancement
-  enhanceNotes: (params: {
-    notes: string
-    transcript?: string
-    language?: string
-    transcriptSegments?: TranscriptSegment[]
-  }) => Promise<{ complete: boolean }>
-
   // Settings
   getSettings: () => Promise<Settings>
   setSettings: (settings: Partial<Settings>) => Promise<{ ok: boolean }>
@@ -152,22 +108,11 @@ export interface PythonAPI {
   // Session
   resetSession: () => Promise<{ ok: boolean }>
 
-  // Model management
-  downloadModel: (params: { modelId: string }) => Promise<{ complete?: boolean; alreadyDownloaded?: boolean; path?: string }>
-  cancelDownload: () => Promise<{ cancelled: boolean }>
-  isModelDownloaded: (params: { modelId: string }) => Promise<{ downloaded: boolean }>
-  getModelStatus: (params: { modelId: string }) => Promise<ModelStatus>
-  deleteModel: (params: { modelId: string }) => Promise<{ deleted: boolean }>
-  getAvailableModels: () => Promise<{ models: AvailableModel[] }>
-  getDownloadedModels: () => Promise<{ models: DownloadedModel[] }>
-
   // Event listeners
   onTranscribeProgress: (callback: (data: { status?: string; progress?: number }) => void) => () => void
-  onEnhanceToken: (callback: (data: { token?: string; status?: string }) => void) => () => void
   onRecordingError: (callback: (data: { message: string }) => void) => () => void
   onRecordingWarning: (callback: (data: { message: string }) => void) => () => void
   onError: (callback: (error: { message: string }) => void) => () => void
-  onDownloadProgress: (callback: (data: DownloadProgress) => void) => () => void
 }
 
 // System API
@@ -188,9 +133,6 @@ const pythonAPI: PythonAPI = {
   // Transcription
   transcribe: (params) => ipcRenderer.invoke('python:transcribe', params),
 
-  // Note enhancement
-  enhanceNotes: (params) => ipcRenderer.invoke('python:enhanceNotes', params),
-
   // Settings
   getSettings: () => ipcRenderer.invoke('python:getSettings'),
   setSettings: (settings) => ipcRenderer.invoke('python:setSettings', settings),
@@ -198,26 +140,11 @@ const pythonAPI: PythonAPI = {
   // Session
   resetSession: () => ipcRenderer.invoke('python:resetSession'),
 
-  // Model management
-  downloadModel: (params) => ipcRenderer.invoke('python:downloadModel', params),
-  cancelDownload: () => ipcRenderer.invoke('python:cancelDownload'),
-  isModelDownloaded: (params) => ipcRenderer.invoke('python:isModelDownloaded', params),
-  getModelStatus: (params) => ipcRenderer.invoke('python:getModelStatus', params),
-  deleteModel: (params) => ipcRenderer.invoke('python:deleteModel', params),
-  getAvailableModels: () => ipcRenderer.invoke('python:getAvailableModels'),
-  getDownloadedModels: () => ipcRenderer.invoke('python:getDownloadedModels'),
-
   // Event listeners - return unsubscribe function
   onTranscribeProgress: (callback) => {
     const handler = (_: Electron.IpcRendererEvent, data: { status?: string; progress?: number }) => callback(data)
     ipcRenderer.on('python:transcribe:progress', handler)
     return () => ipcRenderer.removeListener('python:transcribe:progress', handler)
-  },
-
-  onEnhanceToken: (callback) => {
-    const handler = (_: Electron.IpcRendererEvent, data: { token?: string; status?: string }) => callback(data)
-    ipcRenderer.on('python:enhanceNotes:token', handler)
-    return () => ipcRenderer.removeListener('python:enhanceNotes:token', handler)
   },
 
   onRecordingError: (callback) => {
@@ -236,12 +163,6 @@ const pythonAPI: PythonAPI = {
     const handler = (_: Electron.IpcRendererEvent, error: { message: string }) => callback(error)
     ipcRenderer.on('python:error', handler)
     return () => ipcRenderer.removeListener('python:error', handler)
-  },
-
-  onDownloadProgress: (callback) => {
-    const handler = (_: Electron.IpcRendererEvent, data: DownloadProgress) => callback(data)
-    ipcRenderer.on('python:downloadModel:progress', handler)
-    return () => ipcRenderer.removeListener('python:downloadModel:progress', handler)
   },
 }
 

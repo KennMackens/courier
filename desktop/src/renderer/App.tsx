@@ -1,8 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { StatusBar } from "@/components/StatusBar"
 import { NotesEditor } from "@/components/NotesEditor"
 import { SettingsModal } from "@/components/SettingsModal"
-import { ModelDownloadModal } from "@/components/ModelDownloadModal"
 import { DiscardRecordingModal } from "@/components/DiscardRecordingModal"
 import { SessionHistorySidebar } from "@/components/SessionHistory"
 import { HistorySessionView } from "@/components/HistorySessionView"
@@ -10,16 +9,13 @@ import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert"
 import { Toast, ToastTitle, ToastDescription, ToastContainer } from "@/components/ui/toast"
 import { useRecording } from "@/hooks/useRecording"
 import { useTranscription } from "@/hooks/useTranscription"
-import { useNotesEnhancement } from "@/hooks/useNotesEnhancement"
-import { useEnhancementQueue } from "@/hooks/useEnhancementQueue"
 import { useSettings } from "@/hooks/useSettings"
 import { useSessionHistory } from "@/hooks/useSessionHistory"
-import { useModelManager } from "@/hooks/useModelManager"
 import { applyTheme, getStoredTheme } from "@/lib/theme"
+import { normalizeMeetingTitle, resolveMeetingTitle } from "@/lib/meetingTitle"
 import { AuthProvider, useAuth } from "@/contexts/AuthContext"
 import { AuthScreen } from "@/components/AuthScreen"
 import { Spinner } from "@/components/ui/spinner"
-import ComponentDemo from "@/ComponentDemo"
 
 const SIDEBAR_STORAGE_KEY = 'otto-sidebar-open'
 
@@ -34,26 +30,8 @@ function setSidebarStoredState(open: boolean): void {
 
 // Extract title from notes (first line) or generate fallback
 function extractTitleFromNotes(notes: string): string {
-  if (!notes.trim()) {
-    return formatMeetingTitle(new Date())
-  }
-  const firstLine = notes.split("\n")[0].trim()
-  // Remove markdown headers if present
-  const cleanTitle = firstLine.replace(/^#+\s*/, "").trim()
-  return cleanTitle.slice(0, 100) || formatMeetingTitle(new Date())
-}
-
-// Format meeting title with date/time
-function formatMeetingTitle(date: Date): string {
-  const options: Intl.DateTimeFormatOptions = {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }
-  return `Meeting - ${date.toLocaleString('en-US', options)}`
+  const firstLine = notes.split("\n")[0] ?? ""
+  return resolveMeetingTitle(firstLine, new Date())
 }
 
 interface ConnectionStatus {
@@ -82,23 +60,11 @@ function App() {
 
   // UI state
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsDefaultTab, setSettingsDefaultTab] = useState<"recording" | "transcription" | "enhancement" | "account" | undefined>(undefined)
-  const [downloadModalOpen, setDownloadModalOpen] = useState(false)
   const [discardModalOpen, setDiscardModalOpen] = useState(false)
   const [notes, setNotes] = useState("")
   const [toasts, setToasts] = useState<ToastState[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(() => getSidebarStoredState())
   const toastIdCounterRef = useRef(0)
-
-  // Pending enhancement to execute after model download
-  const pendingEnhancementRef = useRef<{
-    meetingId: string
-    notes: string
-    transcript: string
-    transcriptSegments: { start: number; end: number; text: string }[]
-    language: string
-    userTitle: string
-  } | null>(null)
 
   // Pending recording data for discard modal flow
   const pendingRecordingRef = useRef<{
@@ -113,11 +79,8 @@ function App() {
   const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null)
   // Ref to avoid stale closure in async callbacks
   const currentMeetingIdRef = useRef<string | null>(null)
-  // Track timing for progress UI
-  const [transcriptionStart, setTranscriptionStart] = useState<number | null>(null)
-  const [transcriptionElapsed, setTranscriptionElapsed] = useState(0)
-  const [enhancementStart, setEnhancementStart] = useState<number | null>(null)
-  const [enhancementElapsed, setEnhancementElapsed] = useState(0)
+  // Track start times for progress UI (sidebar computes elapsed locally at coarse cadence)
+  const [transcriptionStartedAt, setTranscriptionStartedAt] = useState<number | null>(null)
 
   // Ref to hold the save function (updated after hooks are defined)
   const saveAndProcessRecordingRef = useRef<(audioLength: number, duration: number) => Promise<void>>()
@@ -145,7 +108,7 @@ function App() {
   })
 
   const transcription = useTranscription({
-    onComplete: async (transcript: string, transcriptSegments) => {
+    onComplete: async (transcript: string) => {
       // Use ref to get current meeting ID (avoids stale closure)
       const meetingId = currentMeetingIdRef.current
 
@@ -158,12 +121,12 @@ function App() {
           // Get the meeting title for indexing
           const meeting = await window.database.getMeeting(meetingId)
           if (meeting) {
-            await window.database.indexMeeting(
-              meetingId,
-              meeting.title || "",
-              transcript,
-              "" // No enhanced notes yet
-            )
+              await window.database.indexMeeting(
+                meetingId,
+                meeting.title || "",
+                transcript,
+                "" // No notes yet
+              )
           }
 
           // Refresh the meeting details in the sidebar
@@ -172,34 +135,7 @@ function App() {
             sessionHistory.selectMeeting(meetingId)
           }
 
-          // Auto-enqueue enhancement after transcription completes
-          // Get the original notes from the database
-          const originalSummary = await window.database.getSummaryByType(meetingId, "original")
-          const originalNotes = originalSummary?.content || ""
-
-          // Extract user title from original notes
-          const [firstLine] = originalNotes.split("\n")
-          const userTitle = firstLine?.trim() || ""
-
-          // Check if model is available before enhancing
-          const enhancementParams = {
-            meetingId: meetingId,
-            notes: originalNotes,
-            transcript: transcript,
-            transcriptSegments,
-            language: settings.settings.language,
-            userTitle,
-          }
-
-          if (modelManager.isModelReady) {
-            enhancementQueue.enqueueEnhancement(enhancementParams)
-            showToast("Transcription Complete", "Audio transcribed. Enhancement starting...", "success")
-          } else {
-            // Store pending enhancement and prompt for download
-            pendingEnhancementRef.current = enhancementParams
-            setDownloadModalOpen(true)
-            showToast("Transcription Complete", "Audio transcribed. Model download required for enhancement.", "default")
-          }
+          showToast("Transcription Complete", "Audio has been transcribed.", "success")
         } catch (error) {
           console.error("Failed to save transcript:", error)
           showToast("Transcription Complete", "Audio has been transcribed.", "success")
@@ -212,10 +148,6 @@ function App() {
     onError: (error) => showToast("Transcription Error", error, "destructive"),
   })
 
-  const enhancement = useNotesEnhancement({
-    // Toasts are now handled in the modal context
-  })
-
   const settings = useSettings({
     onError: (error) => showToast("Settings Error", error, "destructive"),
     onSaved: () => showToast("Settings Saved", "Your settings have been saved.", "success"),
@@ -226,110 +158,21 @@ function App() {
     recordingThresholdRef.current = settings.settings.recordingThreshold
   }, [settings.settings.recordingThreshold])
 
-  // Track transcription timing for progress display
+  // Track transcription start/stop boundaries for progress display
   useEffect(() => {
-    if (transcription.isTranscribing && !transcriptionStart) {
-      setTranscriptionStart(Date.now())
-      setTranscriptionElapsed(0)
+    if (transcription.isTranscribing && transcriptionStartedAt === null) {
+      setTranscriptionStartedAt(Date.now())
     }
-    if (!transcription.isTranscribing && transcriptionStart) {
-      setTranscriptionStart(null)
-      setTranscriptionElapsed(0)
+    if (!transcription.isTranscribing && transcriptionStartedAt !== null) {
+      setTranscriptionStartedAt(null)
     }
-  }, [transcription.isTranscribing, transcriptionStart])
-
-  useEffect(() => {
-    if (!transcriptionStart) return
-    const timer = setInterval(() => {
-      setTranscriptionElapsed(Math.round((Date.now() - transcriptionStart) / 1000))
-    }, 1000)
-    return () => clearInterval(timer)
-  }, [transcriptionStart])
+  }, [transcription.isTranscribing, transcriptionStartedAt])
 
 
   const sessionHistory = useSessionHistory({
     onError: (error) => showToast("History Error", error, "destructive"),
     onMeetingDeleted: () => showToast("Meeting Deleted", "The meeting has been removed.", "default"),
   })
-
-  // Model manager for MLX models
-  const modelManager = useModelManager({
-    modelId: settings.settings.mlxModel,
-    onDownloadComplete: () => {
-      // Process pending enhancement if one exists
-      if (pendingEnhancementRef.current) {
-        const pending = pendingEnhancementRef.current
-        pendingEnhancementRef.current = null
-        enhancementQueue.enqueueEnhancement(pending)
-        showToast("Model Ready", "Enhancement starting...", "success")
-      }
-      setDownloadModalOpen(false)
-    },
-    onDownloadError: (error) => {
-      showToast("Download Failed", error, "destructive")
-    },
-  })
-
-  // Enhancement queue for automatic background processing
-  const enhancementQueue = useEnhancementQueue({
-    onEnhancementStart: (meetingId) => {
-      console.log(`[Enhancement] Started enhancing meeting ${meetingId}`)
-    },
-    onEnhancementComplete: async (meetingId, enhancedNotes) => {
-      // Refresh sidebar to show updated status
-      await sessionHistory.refresh()
-      if (sessionHistory.selectedMeetingId === meetingId) {
-        sessionHistory.selectMeeting(meetingId)
-      }
-
-      // Show toast if user is not viewing the enhanced meeting
-      if (sessionHistory.selectedMeetingId !== meetingId) {
-        const meeting = await window.database.getMeeting(meetingId)
-        showToast(
-          "Enhancement Complete",
-          `"${meeting?.title || 'Meeting'}" has been enhanced.`,
-          "success",
-          () => {
-            // Navigate to the enhanced meeting when toast is clicked
-            setSidebarOpen(true)
-            sessionHistory.selectMeeting(meetingId)
-          }
-        )
-      }
-    },
-    onEnhancementError: async (meetingId, error) => {
-      console.error(`[Enhancement] Failed for meeting ${meetingId}:`, error)
-      await sessionHistory.refresh()
-      showToast("Enhancement Failed", error, "destructive")
-    },
-    onStatusChange: async (meetingId, status) => {
-      // Refresh meeting in sidebar when status changes
-      await sessionHistory.refresh()
-      if (sessionHistory.selectedMeetingId === meetingId) {
-        sessionHistory.selectMeeting(meetingId)
-      }
-    },
-  })
-
-  // Track enhancement timing for progress display
-  useEffect(() => {
-    if (enhancementQueue.isProcessing && enhancementQueue.currentEnhancementId && !enhancementStart) {
-      setEnhancementStart(Date.now())
-      setEnhancementElapsed(0)
-    }
-    if (!enhancementQueue.isProcessing && enhancementStart) {
-      setEnhancementStart(null)
-      setEnhancementElapsed(0)
-    }
-  }, [enhancementQueue.isProcessing, enhancementQueue.currentEnhancementId, enhancementStart])
-
-  useEffect(() => {
-    if (!enhancementStart) return
-    const timer = setInterval(() => {
-      setEnhancementElapsed(Math.round((Date.now() - enhancementStart) / 1000))
-    }, 1000)
-    return () => clearInterval(timer)
-  }, [enhancementStart])
 
   // Toast helper
   const showToast = useCallback(
@@ -362,7 +205,6 @@ function App() {
         title,
         date_time: new Date().toISOString(),
         duration: duration || recording.duration,
-        enhancement_status: 'pending',
         is_new: Date.now(),
       })
 
@@ -421,25 +263,36 @@ function App() {
       setCurrentMeetingId(null)
       currentMeetingIdRef.current = null
       transcription.clearTranscript()
-      enhancement.clearEnhancedNotes()
     }
     sessionHistory.selectMeeting(null)
-  }, [recording.isRecording, transcription.isTranscribing, sessionHistory, transcription, enhancement])
+  }, [recording.isRecording, transcription.isTranscribing, sessionHistory, transcription])
 
   // Handle updating notes for a historical session
-  const handleHistoricalNotesChange = useCallback(async (meetingId: string, notes: string) => {
+  const handleHistoricalNotesChange = useCallback(async (
+    meetingId: string,
+    payload: { title: string; notes: string }
+  ) => {
     try {
-      // Extract title from first line of notes
-      const [firstLine] = notes.split("\n")
-      const newTitle = firstLine?.replace(/^#+\s*/, "").trim().slice(0, 100)
+      const safeTitle = resolveMeetingTitle(normalizeMeetingTitle(payload.title), new Date())
 
-      // Update the meeting title if it changed
-      if (newTitle) {
-        await window.database.updateMeeting(meetingId, { title: newTitle })
+      // Update title metadata
+      await window.database.updateMeeting(meetingId, { title: safeTitle })
+
+      // Update notes summary in the database
+      await window.database.updateSummary(meetingId, "original", payload.notes)
+
+      // Keep search index in sync with edited title/notes.
+      try {
+        const transcriptResult = await window.database.readTranscript(meetingId)
+        await window.database.indexMeeting(
+          meetingId,
+          safeTitle,
+          transcriptResult.content || "",
+          payload.notes
+        )
+      } catch (indexError) {
+        console.warn("[History] Failed to re-index meeting after title/notes update:", indexError)
       }
-
-      // Update the enhanced summary in the database
-      await window.database.updateSummary(meetingId, "enhanced", notes)
 
       // Refresh the sidebar to show updated title
       await sessionHistory.refresh()
@@ -474,49 +327,26 @@ function App() {
   }
 
   const transcriptionProgressPct = normalizeProgress(transcription.progress)
+  const processingState = useMemo(() => {
+    const transcriptionProgress = transcription.isTranscribing
+      ? Math.min(100, Math.max(transcriptionProgressPct, 5))
+      : 0
 
-  const transcriptionEtaSeconds = transcription.isTranscribing && transcriptionProgressPct > 5
-    ? Math.max(
-        0,
-        Math.round(
-          transcriptionElapsed * ((100 - Math.min(99, transcriptionProgressPct)) / Math.max(1, transcriptionProgressPct))
-        )
-      )
-    : null
-
-  const fallbackTranscriptionProgress = transcriptionProgressPct > 0
-    ? transcriptionProgressPct
-    : Math.min(90, Math.max(5, transcriptionElapsed * 2)) // grow ~2%/s up to 90%
-
-  const enhancementProgressPct = enhancementStart
-    ? Math.min(100, Math.max(10, Math.round(enhancementElapsed * 1.5)))
-    : 0
-
-  const processingState = {
-    transcription: transcription.isTranscribing && currentMeetingId
-      ? {
-          meetingId: currentMeetingId,
-          progress: Math.min(100, fallbackTranscriptionProgress),
-          elapsedSeconds: transcriptionElapsed,
-          etaSeconds: transcriptionEtaSeconds,
-        }
-      : null,
-    enhancement: enhancementQueue.isProcessing && enhancementQueue.currentEnhancementId
-      ? {
-          meetingId: enhancementQueue.currentEnhancementId,
-          elapsedSeconds: enhancementElapsed,
-          queuePosition: enhancementQueue.getQueuePosition(enhancementQueue.currentEnhancementId),
-          progress: enhancementProgressPct,
-        }
-      : null,
-  }
-
-  const activeModelInfo = modelManager.availableModels.find(
-    (model) => model.id === settings.settings.mlxModel
-  )
-  const activeModelSizeLabel = activeModelInfo?.size_gb
-    ? `~${activeModelInfo.size_gb} GB`
-    : undefined
+    return {
+      transcription: transcription.isTranscribing && currentMeetingId
+        ? {
+            meetingId: currentMeetingId,
+            progress: transcriptionProgress,
+            startedAt: transcriptionStartedAt,
+          }
+        : null,
+    }
+  }, [
+    currentMeetingId,
+    transcription.isTranscribing,
+    transcriptionProgressPct,
+    transcriptionStartedAt,
+  ])
 
   // Initialize connection to Python
   useEffect(() => {
@@ -596,31 +426,41 @@ function App() {
     setCurrentMeetingId(null)
     currentMeetingIdRef.current = null
     transcription.clearTranscript()
-    enhancement.clearEnhancedNotes()
 
     showToast("Recording Discarded", "The short recording has been discarded.", "default")
-  }, [transcription, enhancement, showToast])
+  }, [transcription, showToast])
 
   // Handle starting a new recording - resets state for fresh session
   const handleStartRecording = useCallback(async () => {
+    // Reset Python-side session first so new recordings never reuse prior audio buffer.
+    try {
+      await window.python.resetSession()
+    } catch (error) {
+      console.error("Failed to reset session before starting recording:", error)
+      showToast(
+        "Error",
+        "Could not start a fresh recording session. Please try again.",
+        "destructive"
+      )
+      return
+    }
+
     // Clear state for new session
     setNotes("")
     setCurrentMeetingId(null)
     currentMeetingIdRef.current = null
     transcription.clearTranscript()
-    enhancement.clearEnhancedNotes()
 
     // Deselect any selected meeting to show fresh editor
     sessionHistory.selectMeeting(null)
 
     // Start recording
     await recording.startRecording()
-  }, [recording, transcription, enhancement, sessionHistory])
+  }, [recording, transcription, sessionHistory, showToast])
 
   // Compute derived state
   const isDisabled = !connectionStatus.connected
-  const isRecordingBlockedByModel = !modelManager.isModelReady
-  const currentError = recording.error || transcription.error || enhancement.error
+  const currentError = recording.error || transcription.error
 
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
@@ -691,31 +531,11 @@ function App() {
           ) : (
             /* Notes Editor with integrated recording controls */
             <div className="flex-1 flex flex-col min-h-0">
-              {!isDisabled && isRecordingBlockedByModel && (
-                <div className="px-6 pt-4">
-                  <Alert variant="info">
-                    <AlertTitle>Model required</AlertTitle>
-                    <AlertDescription className="flex items-center justify-between gap-3">
-                      <span>Download an AI model to start recording.</span>
-                      <button
-                        type="button"
-                        className="text-jade-11 hover:text-jade-12 font-medium underline"
-                        onClick={() => {
-                          setSettingsDefaultTab("enhancement")
-                          setSettingsOpen(true)
-                        }}
-                      >
-                        Go to Settings
-                      </button>
-                    </AlertDescription>
-                  </Alert>
-                </div>
-              )}
               <NotesEditor
                 notes={notes}
                 onNotesChange={setNotes}
                 disabled={isDisabled}
-                startRecordingDisabled={isRecordingBlockedByModel}
+                startRecordingDisabled={false}
                 isRecording={recording.isRecording}
                 isStopping={recording.isStopping}
                 isTranscribing={transcription.isTranscribing}
@@ -750,44 +570,16 @@ function App() {
       {/* Settings Modal */}
       <SettingsModal
         open={settingsOpen}
-        onOpenChange={(open) => {
-          setSettingsOpen(open)
-          if (!open) {
-            setSettingsDefaultTab(undefined)
-          }
-        }}
+        onOpenChange={setSettingsOpen}
         settings={settings.settings}
         isLoading={settings.isLoading}
         isSaving={settings.isSaving}
         error={settings.error}
         onSave={settings.saveSettings}
-        defaultTab={settingsDefaultTab}
         micStatus={recording.micStatus || (permissionGranted ? "active" : "not_granted")}
         micTooltip={recording.micWarning}
         onMicClick={() => window.system?.openMicSettings()}
         systemAudioAvailable={permissionGranted}
-      />
-
-      {/* Model Download Modal */}
-      <ModelDownloadModal
-        open={downloadModalOpen}
-        onOpenChange={setDownloadModalOpen}
-        isDownloading={modelManager.isDownloading}
-        downloadProgress={modelManager.downloadProgress}
-        downloadedSize={modelManager.downloadedSize}
-        totalSize={modelManager.totalSize}
-        downloadSpeed={modelManager.downloadSpeed}
-        isComplete={modelManager.isDownloadComplete}
-        isCancelled={modelManager.isDownloadCancelled}
-        error={modelManager.downloadError}
-        modelName={activeModelInfo?.name}
-        modelSize={activeModelSizeLabel}
-        onDownload={() => modelManager.downloadModel()}
-        onCancel={() => modelManager.cancelDownload()}
-        onRetry={() => {
-          modelManager.resetDownloadState()
-          modelManager.downloadModel()
-        }}
       />
 
       {/* Discard Recording Modal */}

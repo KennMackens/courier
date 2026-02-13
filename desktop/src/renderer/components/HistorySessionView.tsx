@@ -1,8 +1,8 @@
-import { useState, useCallback, useRef, useMemo, useEffect } from "react"
+import { memo, useState, useCallback, useRef, useMemo, useEffect } from "react"
 import ReactMarkdown from "react-markdown"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
-import { Copy, Check, Trash2, ArrowLeft, Sparkles, Pencil, ChevronDown } from "lucide-react"
+import { Copy, Check, Trash2, ArrowLeft, Pencil, ChevronDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import {
@@ -22,6 +22,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
+import { resolveMeetingTitle, stripFirstMatchingH1ForRender, syncMarkdownTitle } from "@/lib/meetingTitle"
 import type { MeetingWithDetails } from "@/hooks/useSessionHistory"
 
 type TabId = "notes" | "transcript"
@@ -47,14 +48,14 @@ interface HistorySessionViewProps {
   transcript: string | null
   isLoading: boolean
   onDelete: () => Promise<boolean>
-  onNotesChange: (meetingId: string, notes: string) => Promise<void>
+  onNotesChange: (meetingId: string, payload: { title: string; notes: string }) => Promise<void>
   onReturnToActiveSession?: () => void
   isRecording?: boolean
   recordingDuration?: number
   className?: string
 }
 
-export function HistorySessionView({
+function HistorySessionViewComponent({
   meeting,
   transcript,
   isLoading,
@@ -73,26 +74,36 @@ export function HistorySessionView({
   const [isEditing, setIsEditing] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // Check if notes are read-only during enhancement
-  const isEnhancing = meeting.enhancement_status === 'enhancing'
-  const isPending = meeting.enhancement_status === 'pending'
-  const isReadOnly = isEnhancing || isPending
-
-  // Get enhanced notes (or raw if no enhanced)
-  const getEnhancedNotes = useCallback(() => {
-    const enhanced = meeting.summaries.find((s) => s.type === "enhanced")
-    if (enhanced?.content) return enhanced.content
+  // Use the original summary as the editable notes source.
+  const getMeetingNotes = useCallback(() => {
     const original = meeting.summaries.find((s) => s.type === "original")
     return original?.content || ""
   }, [meeting.summaries])
 
+  const fallbackDate = useMemo(() => {
+    const parsed = new Date(meeting.date_time)
+    return Number.isNaN(parsed.getTime()) ? new Date() : parsed
+  }, [meeting.date_time])
+
+  const persistedTitle = useMemo(
+    () => resolveMeetingTitle(meeting.title ?? "", fallbackDate),
+    [meeting.title, fallbackDate]
+  )
+
   // Local state for editable notes
+  const [editedTitle, setEditedTitle] = useState<string | null>(null)
   const [editedNotes, setEditedNotes] = useState<string | null>(null)
-  const currentNotes = editedNotes !== null ? editedNotes : getEnhancedNotes()
+  const currentTitle = editedTitle !== null ? editedTitle : persistedTitle
+  const currentNotes = editedNotes !== null ? editedNotes : getMeetingNotes()
+  const renderedNotes = useMemo(
+    () => stripFirstMatchingH1ForRender(currentNotes, persistedTitle),
+    [currentNotes, persistedTitle]
+  )
 
   // Reset edit mode when meeting changes
   useEffect(() => {
     setIsEditing(false)
+    setEditedTitle(null)
     setEditedNotes(null)
   }, [meeting.id])
 
@@ -103,26 +114,43 @@ export function HistorySessionView({
     []
   )
 
+  const handleTitleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setEditedTitle(e.target.value)
+  }, [])
+
   // Save notes and exit edit mode
   const handleSave = useCallback(async () => {
-    if (editedNotes !== null && editedNotes !== getEnhancedNotes()) {
+    const persistedNotes = getMeetingNotes()
+    const resolvedTitle = resolveMeetingTitle(currentTitle, fallbackDate)
+    const notesDraft = editedNotes !== null ? editedNotes : persistedNotes
+    const syncedNotes = syncMarkdownTitle(notesDraft, resolvedTitle)
+
+    const titleChanged = resolvedTitle !== persistedTitle
+    const notesChanged = syncedNotes !== persistedNotes
+
+    if (titleChanged || notesChanged) {
       setIsSaving(true)
       try {
-        await onNotesChange(meeting.id, editedNotes)
+        await onNotesChange(meeting.id, {
+          title: resolvedTitle,
+          notes: syncedNotes,
+        })
       } finally {
         setIsSaving(false)
       }
     }
     setIsEditing(false)
-  }, [editedNotes, getEnhancedNotes, meeting.id, onNotesChange])
+  }, [currentTitle, editedNotes, fallbackDate, getMeetingNotes, meeting.id, onNotesChange, persistedTitle])
 
   // Enter edit mode
   const handleEdit = useCallback(() => {
-    setEditedNotes(getEnhancedNotes())
+    const baseNotes = getMeetingNotes()
+    setEditedTitle(persistedTitle)
+    setEditedNotes(stripFirstMatchingH1ForRender(baseNotes, persistedTitle))
     setIsEditing(true)
     // Focus textarea after render
     setTimeout(() => textareaRef.current?.focus(), 0)
-  }, [getEnhancedNotes])
+  }, [getMeetingNotes, persistedTitle])
 
   // Custom components for ReactMarkdown styling
   const markdownComponents = useMemo(() => ({
@@ -379,20 +407,40 @@ export function HistorySessionView({
       </div>
 
       {/* Content */}
-      <div className="flex-1 min-h-0 overflow-auto p-6 pb-20">
+      <div
+        className={cn(
+          "flex-1 min-h-0 p-6 pb-20",
+          activeTab === "notes" && isEditing ? "overflow-hidden" : "overflow-auto"
+        )}
+      >
         {activeTab === "notes" ? (
           <div className="flex flex-col">
-            {/* Read-only notice during enhancement */}
-            {isReadOnly && (
-              <div className="flex items-center gap-2 px-3 py-2 mb-4 rounded-md bg-jade-2 text-jade-11 text-sm">
-                <Sparkles className="h-4 w-4" />
-                <span>
-                  {isEnhancing
-                    ? "Notes are read-only while enhancement is in progress..."
-                    : "Notes are read-only while transcription is processing..."}
-                </span>
+            {/* Dedicated title above notes */}
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                {isEditing ? (
+                  <input
+                    type="text"
+                    value={currentTitle}
+                    onChange={handleTitleChange}
+                    placeholder="Title"
+                    className={cn(
+                      "w-full bg-transparent text-foreground font-bold text-2xl",
+                      "placeholder:text-slate-9",
+                      "border-0 outline-none focus:outline-none focus:ring-0"
+                    )}
+                  />
+                ) : (
+                  <h1 className="text-2xl font-bold text-foreground">{persistedTitle}</h1>
+                )}
               </div>
-            )}
+              {!isEditing && (
+                <Button variant="ghost" size="sm" onClick={handleEdit} className="shrink-0">
+                  <Pencil className="h-4 w-4 mr-1" />
+                  Edit
+                </Button>
+              )}
+            </div>
 
             {isEditing ? (
               /* Edit mode - full markdown source in textarea */
@@ -404,7 +452,7 @@ export function HistorySessionView({
                   placeholder="Write your notes in Markdown..."
                   rows={20}
                   className={cn(
-                    "w-full h-full min-h-full resize-none bg-transparent border-0 text-slate-12",
+                    "w-full h-full min-h-full resize-none overflow-y-auto bg-transparent border-0 text-slate-12",
                     "placeholder:text-slate-9 text-base leading-7",
                     "outline-none focus-visible:outline-none focus-visible:ring-0"
                   )}
@@ -412,25 +460,13 @@ export function HistorySessionView({
               </div>
             ) : (
               /* View mode - rendered markdown */
-              <div className="relative group">
-                {currentNotes.trim() ? (
+              <div className="group">
+                {renderedNotes.trim() ? (
                   <ReactMarkdown components={markdownComponents}>
-                    {currentNotes}
+                    {renderedNotes}
                   </ReactMarkdown>
                 ) : (
                   <p className="text-slate-9 text-sm">No notes for this meeting...</p>
-                )}
-                {/* Edit button - shown on hover when not read-only */}
-                {!isReadOnly && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleEdit}
-                    className="absolute top-0 right-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <Pencil className="h-4 w-4 mr-1" />
-                    Edit
-                  </Button>
                 )}
               </div>
             )}
@@ -468,7 +504,7 @@ export function HistorySessionView({
                   Saving...
                 </>
               ) : (
-                "Done"
+                "Save"
               )}
             </Button>
           )}
@@ -518,3 +554,20 @@ export function HistorySessionView({
     </div>
   )
 }
+
+function areHistorySessionViewPropsEqual(
+  prev: HistorySessionViewProps,
+  next: HistorySessionViewProps
+): boolean {
+  return (
+    prev.meeting.id === next.meeting.id &&
+    prev.meeting.updated_at === next.meeting.updated_at &&
+    prev.transcript === next.transcript &&
+    prev.isLoading === next.isLoading &&
+    prev.isRecording === next.isRecording &&
+    prev.recordingDuration === next.recordingDuration &&
+    prev.className === next.className
+  )
+}
+
+export const HistorySessionView = memo(HistorySessionViewComponent, areHistorySessionViewPropsEqual)

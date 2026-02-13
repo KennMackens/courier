@@ -5,6 +5,7 @@ Simple batch transcription - transcribes complete audio after recording.
 """
 
 import sys
+import os
 import threading
 import numpy as np
 from typing import Optional, Callable
@@ -29,12 +30,23 @@ WHISPER_MODELS = [
 ]
 
 
+def get_cpu_thread_limit() -> int:
+    """Return bounded CPU thread count for whisper inference."""
+    raw = os.environ.get("OTTO_CPU_THREAD_LIMIT", "2")
+    try:
+        parsed = int(raw)
+    except (TypeError, ValueError):
+        return 2
+    return max(1, parsed)
+
+
 @dataclass
 class TranscriberConfig:
     """Configuration for the transcriber."""
     model_size: str = "medium"  # Use medium for good Dutch support
     language: str = SUPPORTED_TRANSCRIPTION_LANGUAGE
     beam_size: int = 5
+    cpu_threads: Optional[int] = None
 
 
 def get_compute_device() -> tuple[str, str]:
@@ -71,10 +83,20 @@ class Transcriber:
         _debug(f"Loading Whisper model '{self.config.model_size}' on {device} ({compute_type})...")
         _debug(f"Language: {self.config.language}")
 
+        cpu_threads = self.config.cpu_threads or get_cpu_thread_limit()
+        model_kwargs = {}
+        if device == "cpu":
+            model_kwargs = {
+                "cpu_threads": cpu_threads,
+                "num_workers": 1,
+            }
+            _debug(f"Using CPU threads={cpu_threads} for whisper inference.")
+
         self._model = WhisperModel(
             self.config.model_size,
             device=device,
-            compute_type=compute_type
+            compute_type=compute_type,
+            **model_kwargs,
         )
         self._model_loaded_for = self.config.model_size
         _debug("Model loaded successfully.")

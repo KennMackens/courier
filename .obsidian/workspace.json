@@ -20,8 +20,23 @@
               "icon": "lucide-file",
               "title": "CLAUDE"
             }
+          },
+          {
+            "id": "fe54c67f53415f1a",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "BUILD.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "BUILD"
+            }
           }
-        ]
+        ],
+        "currentTab": 1
       }
     ],
     "direction": "vertical"
@@ -183,19 +198,19 @@
       "bases:Create new base": false
     }
   },
-  "active": "0baec26608bb20c4",
+  "active": "fe54c67f53415f1a",
   "lastOpenFiles": [
-    "app/__pycache__/prompts.cpython-310.pyc",
-    "app/prompts.py",
-    "desktop/dist/renderer/assets/index-CTFq_s1-.js",
-    "desktop/dist/renderer/assets/geist-latin-wght-normal-Dm3htQBi.woff2",
-    "desktop/dist/renderer/assets/geist-mono-latin-ext-wght-normal-b6lpi8_2.woff2",
-    "desktop/dist/renderer/assets/index-DsYXgVVq.js",
-    "desktop/dist/renderer/assets/geist-mono-cyrillic-wght-normal-BZdD_g9V.woff2",
-    "desktop/dist/renderer/assets/geist-latin-ext-wght-normal-DMtmJ5ZE.woff2",
-    "desktop/dist/renderer/assets/index-C7oorgjV.js",
-    "desktop/dist/renderer/assets/index-7iPU80Ga.css",
-    "desktop/dist/renderer/assets/index-BQPv0R2V.js",
+    "desktop/release/mac-arm64/Otto.app/Contents/Resources/python-backend/_internal/scipy/optimize/_highspy/_highs_options.cpython-310-darwin.so.cstemp",
+    "desktop/release/mac-arm64/Otto.app/Contents/Resources/python-backend/_internal/scipy/optimize/_highspy/_core.cpython-310-darwin.so.cstemp",
+    "desktop/release/mac-arm64/Otto.app/Contents/Resources/python-backend/_internal/scipy/io/matlab/_streams.cpython-310-darwin.so.cstemp",
+    "desktop/release/mac-arm64/Otto.app/Contents/Resources/python-backend/_internal/scipy/io/matlab/_mio_utils.cpython-310-darwin.so.cstemp",
+    "desktop/release/mac-arm64/Otto.app/Contents/Resources/python-backend/_internal/scipy/io/matlab/_mio5_utils.cpython-310-darwin.so.cstemp",
+    "desktop/release/mac-arm64/Otto.app/Contents/Resources/python-backend/_internal/scipy/io/_fast_matrix_market/_fmm_core.cpython-310-darwin.so.cstemp",
+    "desktop/release/mac-arm64/Otto.app/Contents/Resources/python-backend/_internal/scipy/fft/_pocketfft/pypocketfft.cpython-310-darwin.so.cstemp",
+    "desktop/release/mac-arm64/Otto.app/Contents/Resources/python-backend/_internal/scipy/_lib/_uarray/_uarray.cpython-310-darwin.so.cstemp",
+    "desktop/release/mac-arm64/Otto.app/Contents/Resources/python-backend/_internal/numba/np/ufunc/workqueue.cpython-310-darwin.so.cstemp",
+    "desktop/release/mac-arm64/Otto.app/Contents/Resources/python-backend/_internal/numba/np/ufunc/omppool.cpython-310-darwin.so.cstemp",
+    "desktop/release/mac-arm64/Otto.app/Contents/Resources/python-backend/_internal/numba/np/ufunc/_internal.cpython-310-darwin.so.cstemp",
     "desktop/release/mac-arm64/Otto.app/Contents/Resources/python-backend/_internal/matplotlib/mpl-data/sample_data/logo2.png",
     "desktop/release/mac-arm64/Otto.app/Contents/Resources/python-backend/_internal/matplotlib/mpl-data/sample_data/grace_hopper.jpg",
     "desktop/release/mac-arm64/Otto.app/Contents/Resources/python-backend/_internal/matplotlib/mpl-data/sample_data/Minduka_Present_Blue_Pack.png",

@@ -1,9 +1,12 @@
+import { memo, useEffect, useMemo, useState } from "react"
 import { Search, X, FolderOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { SessionListItem } from "./SessionListItem"
 import { cn } from "@/lib/utils"
 import type { Meeting } from "@/hooks/useSessionHistory"
+
+const PROCESSING_TICK_MS = 2000
 
 interface SessionHistorySidebarProps {
   open: boolean
@@ -20,19 +23,12 @@ interface SessionHistorySidebarProps {
     transcription: {
       meetingId: string
       progress: number
-      elapsedSeconds: number
-      etaSeconds: number | null
-    } | null
-    enhancement: {
-      meetingId: string
-      elapsedSeconds: number
-      queuePosition: number
-      progress: number
+      startedAt: number | null
     } | null
   }
 }
 
-export function SessionHistorySidebar({
+function SessionHistorySidebarComponent({
   open,
   onClose,
   meetings,
@@ -45,6 +41,27 @@ export function SessionHistorySidebar({
   isEmpty,
   processing,
 }: SessionHistorySidebarProps) {
+  const [tickTime, setTickTime] = useState(() => Date.now())
+
+  const activeTranscription = processing?.transcription
+
+  useEffect(() => {
+    if (!activeTranscription) {
+      return
+    }
+
+    const interval = setInterval(() => {
+      setTickTime(Date.now())
+    }, PROCESSING_TICK_MS)
+
+    return () => clearInterval(interval)
+  }, [activeTranscription])
+
+  const elapsedFromStartedAt = (startedAt: number | null): number => {
+    if (!startedAt) return 0
+    return Math.max(0, Math.round((tickTime - startedAt) / 1000))
+  }
+
   const formatDuration = (seconds: number) => {
     if (!seconds || seconds < 1) return "0s"
     const mins = Math.floor(seconds / 60)
@@ -56,8 +73,23 @@ export function SessionHistorySidebar({
     return `${hours}h ${remMins.toString().padStart(2, "0")}m`
   }
 
-  const activeTranscription = processing?.transcription
-  const activeEnhancement = processing?.enhancement
+  const activeTranscriptionElapsed = elapsedFromStartedAt(activeTranscription?.startedAt ?? null)
+
+  const activeTranscriptionEta = useMemo(() => {
+    if (!activeTranscription) return null
+
+    const clampedProgress = Math.min(99, Math.max(0, activeTranscription.progress))
+    if (clampedProgress <= 5 || activeTranscriptionElapsed <= 0) {
+      return null
+    }
+
+    return Math.max(
+      0,
+      Math.round(
+        activeTranscriptionElapsed * ((100 - clampedProgress) / Math.max(1, clampedProgress))
+      )
+    )
+  }, [activeTranscription, activeTranscriptionElapsed])
 
   return (
     <div
@@ -83,7 +115,7 @@ export function SessionHistorySidebar({
         </div>
 
         {/* Processing status */}
-        {(activeTranscription || activeEnhancement) && (
+        {activeTranscription && (
           <div className="px-4 py-3 border-b border-slate-6 space-y-3 bg-slate-2">
             {activeTranscription && (
               <div className="space-y-2">
@@ -92,11 +124,11 @@ export function SessionHistorySidebar({
                   <span>{`${Math.round(activeTranscription.progress)}%`}</span>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-slate-10">
-                  <span>Elapsed {formatDuration(activeTranscription.elapsedSeconds)}</span>
-                  {activeTranscription.etaSeconds !== null && (
+                  <span>Elapsed {formatDuration(activeTranscriptionElapsed)}</span>
+                  {activeTranscriptionEta !== null && (
                     <>
                       <span className="text-slate-8">•</span>
-                      <span>~{formatDuration(activeTranscription.etaSeconds)} remaining</span>
+                      <span>~{formatDuration(activeTranscriptionEta)} remaining</span>
                     </>
                   )}
                 </div>
@@ -105,34 +137,6 @@ export function SessionHistorySidebar({
                     className="h-full bg-jade-9 transition-all"
                     style={{ width: `${Math.min(100, Math.max(0, activeTranscription.progress))}%` }}
                   />
-                </div>
-              </div>
-            )}
-
-            {activeEnhancement && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm font-semibold text-slate-12">
-                  <span>Enhancing notes…</span>
-                  <span className="text-xs font-medium text-slate-10">
-                    {activeEnhancement.queuePosition > 0
-                      ? `In queue • ${activeEnhancement.queuePosition}`
-                      : "Processing"}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 text-xs text-slate-10">
-                  <span>Elapsed {formatDuration(activeEnhancement.elapsedSeconds)}</span>
-                  <span className="text-slate-8">•</span>
-                  <span>Streaming output</span>
-                </div>
-                <div className="h-2 rounded-full bg-slate-4 overflow-hidden">
-                  {activeEnhancement.progress > 0 ? (
-                    <div
-                      className="h-full bg-jade-9 transition-all"
-                      style={{ width: `${Math.min(100, Math.max(0, activeEnhancement.progress))}%` }}
-                    />
-                  ) : (
-                    <div className="h-full w-1/3 min-w-[24%] bg-gradient-to-r from-jade-6 via-jade-9 to-jade-6 animate-pulse" />
-                  )}
                 </div>
               </div>
             )}
@@ -202,15 +206,7 @@ export function SessionHistorySidebar({
                       ? {
                           meetingId: processing.transcription.meetingId,
                           progress: processing.transcription.progress,
-                          etaSeconds: processing.transcription.etaSeconds,
-                        }
-                      : null
-                  }
-                  enhancementProgress={
-                    processing?.enhancement
-                      ? {
-                          currentId: processing.enhancement.meetingId,
-                          queuePosition: processing.enhancement.queuePosition,
+                          etaSeconds: activeTranscriptionEta,
                         }
                       : null
                   }
@@ -223,3 +219,5 @@ export function SessionHistorySidebar({
     </div>
   )
 }
+
+export const SessionHistorySidebar = memo(SessionHistorySidebarComponent)

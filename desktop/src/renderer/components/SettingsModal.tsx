@@ -1,7 +1,5 @@
 import * as React from "react"
 import {
-  Trash2,
-  CheckCircle2,
   LogOut,
   User as UserIcon,
   Heart,
@@ -29,16 +27,15 @@ import {
 } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
   Settings,
   LANGUAGE_OPTIONS,
   WHISPER_MODEL_OPTIONS,
+  PERFORMANCE_MODE_OPTIONS,
   RECORDING_THRESHOLD_OPTIONS,
   THEME_OPTIONS,
 } from "@/hooks/useSettings"
-import { useModelManager } from "@/hooks/useModelManager"
 import { useAuth } from "@/contexts/AuthContext"
 import { applyTheme } from "@/lib/theme"
 import { cn } from "@/lib/utils"
@@ -69,12 +66,11 @@ interface SettingsModalProps {
   defaultTab?: SettingsTab
 }
 
-type SettingsTab = "recording" | "transcription" | "enhancement" | "account"
+type SettingsTab = "recording" | "transcription" | "account"
 
 const SETTINGS_TABS: SettingsTabOption<SettingsTab>[] = [
   { id: "recording", label: "Recording" },
   { id: "transcription", label: "Transcription" },
-  { id: "enhancement", label: "Enhancement" },
   { id: "account", label: "Account" },
 ]
 
@@ -87,7 +83,6 @@ const accountTypeMeta: Record<
     description: string
     icon: React.ReactNode
     tone: SettingsStatusTone
-    badgeLabel?: string
   }
 > = {
   early_bird: {
@@ -95,28 +90,24 @@ const accountTypeMeta: Record<
     description: "Free access",
     icon: <Bird className="h-5 w-5 text-amber-11" />,
     tone: "warning",
-    badgeLabel: "Free",
   },
   friend: {
     label: "Friend of Otto",
     description: "Lifetime free access",
     icon: <Heart className="h-5 w-5 text-pink-11" />,
     tone: "accent",
-    badgeLabel: "Lifetime",
   },
   paid: {
     label: "Paid",
     description: "Billing when available",
     icon: <UserIcon className="h-5 w-5 text-jade-11" />,
     tone: "ready",
-    badgeLabel: "Paid",
   },
   unknown: {
     label: "Account type pending",
     description: "Awaiting assignment",
     icon: <HelpCircle className="h-5 w-5 text-slate-10" />,
     tone: "neutral",
-    badgeLabel: "Pending",
   },
 }
 
@@ -129,7 +120,6 @@ function AccountBadge({ accountType }: { accountType: AccountType }) {
       description={meta.description}
       icon={meta.icon}
       tone={meta.tone}
-      badgeLabel={meta.badgeLabel}
     />
   )
 }
@@ -152,29 +142,12 @@ export function SettingsModal({
   // Local form state (for cancel behavior)
   const [formState, setFormState] = React.useState<Settings>(settings)
   const [activeTab, setActiveTab] = React.useState<SettingsTab>("transcription")
-  const [confirmingDeleteId, setConfirmingDeleteId] = React.useState<string | null>(null)
 
   // Auth state
   const { user, userProfile, signOut: authSignOut } = useAuth()
 
-  // Model manager for MLX models
-  const modelManager = useModelManager()
-  const { checkModelStatus, loadModels } = modelManager
-  const downloadedModelIds = React.useMemo(
-    () => new Set(modelManager.downloadedModels.map((model) => model.modelId)),
-    [modelManager.downloadedModels]
-  )
-
   const getLabel = <T extends { value: string; label: string }>(options: readonly T[], value: string) =>
     options.find((o) => o.value === value)?.label || value
-
-  // Fetch models when modal opens
-  React.useEffect(() => {
-    if (open) {
-      checkModelStatus()
-      loadModels()
-    }
-  }, [open, checkModelStatus, loadModels])
 
   // Only sync form state when modal opens, not on settings changes (to avoid resetting user edits)
   const prevOpenRef = React.useRef(false)
@@ -230,28 +203,6 @@ export function SettingsModal({
     }
   }
 
-  // Handle model deletion with fallback for active model
-  const handleDeleteModel = async (modelId: string) => {
-    const isActiveModel = formState.mlxModel === modelId
-    const deleted = await modelManager.deleteModel(modelId)
-
-    if (deleted && isActiveModel) {
-      // Find another downloaded model to fallback to
-      const remainingModels = modelManager.downloadedModels.filter(
-        (m) => m.modelId !== modelId
-      )
-      if (remainingModels.length > 0) {
-        // Auto-select the first remaining model
-        updateField("mlxModel", remainingModels[0].modelId)
-      } else {
-        // Keep selected model ID so user can reinstall the same supported model
-        updateField("mlxModel", modelId)
-      }
-    }
-
-    setConfirmingDeleteId(null)
-  }
-
   // Handle close - save any pending changes immediately
   const handleClose = () => {
     // Clear any pending debounced save
@@ -304,7 +255,7 @@ export function SettingsModal({
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription className="text-sm text-slate-10">
-            Configure recording, transcription, enhancement, and account settings.
+            Configure recording, transcription, and account settings.
           </DialogDescription>
         </DialogHeader>
         <DialogClose />
@@ -366,6 +317,33 @@ export function SettingsModal({
                         </SelectTrigger>
                         <SelectContent>
                           {WHISPER_MODEL_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              <div className="flex flex-col">
+                                <span>{option.label}</span>
+                                <span className="text-xs text-slate-9">{option.description}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </SettingsField>
+
+                    <SettingsField
+                      label="Performance Mode"
+                      htmlFor="performanceMode"
+                      helpText="Use Low CPU if Otto causes system lag during transcribing."
+                    >
+                      <Select
+                        value={formState.performanceMode}
+                        onValueChange={(value) => updateField("performanceMode", value as Settings["performanceMode"])}
+                      >
+                        <SelectTrigger id="performanceMode">
+                          <span className="truncate text-left">
+                            {getLabel(PERFORMANCE_MODE_OPTIONS, formState.performanceMode)}
+                          </span>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PERFORMANCE_MODE_OPTIONS.map((option) => (
                             <SelectItem key={option.value} value={option.value}>
                               <div className="flex flex-col">
                                 <span>{option.label}</span>
@@ -476,240 +454,8 @@ export function SettingsModal({
                 </SettingsPanel>
               )}
 
-              {activeTab === "enhancement" && (
-                <SettingsPanel tabId="enhancement">
-                  <SettingsSection
-                    title="Model management"
-                    description="Install and select local AI models used for note enhancement."
-                  >
-                    <div className="rounded-lg border border-slate-6 bg-white px-3 py-2 text-xs text-slate-10 dark:bg-black">
-                      Active model:{" "}
-                      <span className="font-medium text-slate-12">
-                        {modelManager.availableModels.find((model) => model.id === formState.mlxModel)?.name ||
-                          formState.mlxModel}
-                      </span>
-                    </div>
-
-                    {modelManager.availableModels.length > 0 ? (
-                      modelManager.availableModels.map((model) => {
-                        const isInstalled = downloadedModelIds.has(model.id)
-                        const isActive = formState.mlxModel === model.id && isInstalled
-                        const isDownloading =
-                          modelManager.isDownloading && modelManager.downloadingModelId === model.id
-                        const isConfirmingDelete = confirmingDeleteId === model.id
-                        const sizeLabel = model.size_gb ? `~${model.size_gb} GB` : "Size unknown"
-                        const downloadedModel = modelManager.downloadedModels.find(
-                          (m) => m.modelId === model.id
-                        )
-                        const installedSizeLabel = downloadedModel?.size || sizeLabel
-
-                        return (
-                          <div
-                            key={model.id}
-                            className={cn(
-                              "rounded-lg border p-3 transition-colors",
-                              isActive
-                                ? "border-jade-7 bg-white dark:bg-black"
-                                : "border-slate-6 bg-white dark:bg-black"
-                            )}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2">
-                                  <p className="truncate text-sm font-medium text-slate-12">{model.name}</p>
-                                  {isActive ? (
-                                    <span className="flex items-center gap-1 text-[11px] font-medium text-jade-11">
-                                      <CheckCircle2 className="h-3 w-3" />
-                                      Active
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <p className="mt-1 truncate text-xs text-slate-10">{model.description}</p>
-                                <p className="mt-1 text-[11px] text-slate-9">
-                                  {isInstalled ? installedSizeLabel : sizeLabel}
-                                </p>
-                              </div>
-
-                              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                                {!isInstalled && !isDownloading ? (
-                                  <Button
-                                    type="button"
-                                    variant="default"
-                                    size="sm"
-                                    onClick={() => modelManager.downloadModel(model.id)}
-                                    disabled={modelManager.isDownloading}
-                                  >
-                                    Install
-                                  </Button>
-                                ) : null}
-
-                                {isDownloading ? (
-                                  <Button type="button" variant="outline" size="sm" disabled>
-                                    Downloading
-                                  </Button>
-                                ) : null}
-
-                                {isInstalled && !isActive && !isDownloading ? (
-                                  <>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => updateField("mlxModel", model.id)}
-                                    >
-                                      Set Active
-                                    </Button>
-                                    {isConfirmingDelete ? (
-                                      <div className="flex items-center gap-1 text-xs">
-                                        <span className="text-slate-11">Delete?</span>
-                                        <Button
-                                          type="button"
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={() => handleDeleteModel(model.id)}
-                                          className="h-7 px-2 text-red-11 hover:bg-red-3 hover:text-red-12"
-                                        >
-                                          Yes
-                                        </Button>
-                                        <Button
-                                          type="button"
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={() => setConfirmingDeleteId(null)}
-                                          className="h-7 px-2 text-slate-11 hover:text-slate-12"
-                                        >
-                                          No
-                                        </Button>
-                                      </div>
-                                    ) : (
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => setConfirmingDeleteId(model.id)}
-                                        className="text-red-11 hover:bg-red-3 hover:text-red-12"
-                                      >
-                                        <Trash2 className="h-3 w-3" />
-                                      </Button>
-                                    )}
-                                  </>
-                                ) : null}
-
-                                {isInstalled && isActive && !isDownloading ? (
-                                  <>
-                                    {isConfirmingDelete ? (
-                                      <div className="flex items-center gap-1 text-xs">
-                                        <span className="text-slate-11">Delete?</span>
-                                        <Button
-                                          type="button"
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={() => handleDeleteModel(model.id)}
-                                          className="h-7 px-2 text-red-11 hover:bg-red-3 hover:text-red-12"
-                                        >
-                                          Yes
-                                        </Button>
-                                        <Button
-                                          type="button"
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={() => setConfirmingDeleteId(null)}
-                                          className="h-7 px-2 text-slate-11 hover:text-slate-12"
-                                        >
-                                          No
-                                        </Button>
-                                      </div>
-                                    ) : (
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => setConfirmingDeleteId(model.id)}
-                                        className="text-red-11 hover:bg-red-3 hover:text-red-12"
-                                      >
-                                        <Trash2 className="h-3 w-3" />
-                                      </Button>
-                                    )}
-                                  </>
-                                ) : null}
-                              </div>
-                            </div>
-
-                            {isDownloading ? (
-                              <div className="mt-3 space-y-1">
-                                <div className="flex items-center justify-between text-[11px] text-slate-9">
-                                  <span>Downloading</span>
-                                  <span>
-                                    {modelManager.downloadedSize || "0.0 MB"}
-                                    {modelManager.totalSize &&
-                                    modelManager.totalSize !== "unknown" &&
-                                    modelManager.totalSize !== "0.0 MB"
-                                      ? ` / ${modelManager.totalSize}`
-                                      : ""}
-                                  </span>
-                                </div>
-                                <Progress
-                                  value={modelManager.downloadProgress}
-                                  indeterminate={
-                                    !modelManager.totalSize ||
-                                    modelManager.totalSize === "unknown" ||
-                                    modelManager.totalSize === "0.0 MB"
-                                  }
-                                  className="h-1.5"
-                                />
-                              </div>
-                            ) : null}
-                          </div>
-                        )
-                      })
-                    ) : (
-                      <div className="rounded-lg border border-slate-6 bg-white px-3 py-2 text-xs text-slate-10 dark:bg-black">
-                        No available models found.
-                      </div>
-                    )}
-
-                    {modelManager.hasDownloadError ? (
-                      <Alert variant="destructive" className="py-2">
-                        <AlertDescription className="text-xs">
-                          {modelManager.downloadError}
-                        </AlertDescription>
-                      </Alert>
-                    ) : null}
-                  </SettingsSection>
-                </SettingsPanel>
-              )}
-
               {activeTab === "account" && (
                 <SettingsPanel tabId="account">
-                  <SettingsSection
-                    title="Appearance"
-                    description="Choose how Otto looks while you work."
-                  >
-                    <SettingsField
-                      label="Theme"
-                      htmlFor="theme"
-                      helpText="Use System to follow your macOS appearance preference."
-                    >
-                      <Select
-                        value={formState.theme}
-                        onValueChange={(value) => updateField("theme", value as Settings["theme"])}
-                      >
-                        <SelectTrigger id="theme">
-                          <span className="truncate text-left">
-                            {getLabel(THEME_OPTIONS, formState.theme)}
-                          </span>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {THEME_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </SettingsField>
-                  </SettingsSection>
-
                   <SettingsSection
                     title="Profile & access"
                     description="Manage your account details and sign-in session."
@@ -746,6 +492,35 @@ export function SettingsModal({
                       <LogOut className="mr-2 h-4 w-4" />
                       Sign Out
                     </Button>
+                  </SettingsSection>
+
+                  <SettingsSection
+                    title="Appearance"
+                    description="Choose how Otto looks while you work."
+                  >
+                    <SettingsField
+                      label="Theme"
+                      htmlFor="theme"
+                      helpText="Use System to follow your macOS appearance preference."
+                    >
+                      <Select
+                        value={formState.theme}
+                        onValueChange={(value) => updateField("theme", value as Settings["theme"])}
+                      >
+                        <SelectTrigger id="theme">
+                          <span className="truncate text-left">
+                            {getLabel(THEME_OPTIONS, formState.theme)}
+                          </span>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {THEME_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </SettingsField>
                   </SettingsSection>
                 </SettingsPanel>
               )}

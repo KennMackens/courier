@@ -13,6 +13,9 @@ import * as path from 'path'
 import * as fs from 'fs'
 import { app } from 'electron'
 
+const DEFAULT_PYTHON_NICE = 15
+const DEFAULT_CPU_THREAD_LIMIT = '2'
+
 // IPC Protocol types
 interface Request {
   jsonrpc: '2.0'
@@ -62,11 +65,63 @@ export class PythonBridge extends EventEmitter {
   private readyPromise: Promise<void> | null = null
   private readyResolve: (() => void) | null = null
   private logFile: fs.WriteStream | null = null
+  private readonly mirrorLogsToConsole =
+    !app.isPackaged || process.env.OTTO_VERBOSE_PYTHON_BRIDGE === '1'
+  private lastStderrMessage = ''
+  private lastStderrAt = 0
+  private suppressedStderrCount = 0
 
   private log(msg: string): void {
     const line = `[${new Date().toISOString()}] ${msg}\n`
-    console.log(msg)
+    if (this.mirrorLogsToConsole) {
+      console.log(msg)
+    }
     this.logFile?.write(line)
+  }
+
+  private handleStderrMessage(message: string): void {
+    const now = Date.now()
+    const isDuplicateBurst = message === this.lastStderrMessage && now - this.lastStderrAt < 2000
+
+    if (isDuplicateBurst) {
+      this.suppressedStderrCount += 1
+      this.lastStderrAt = now
+      return
+    }
+
+    if (this.suppressedStderrCount > 0) {
+      this.log(`[Python stderr] (suppressed ${this.suppressedStderrCount} duplicate lines)`)
+      this.suppressedStderrCount = 0
+    }
+
+    this.lastStderrMessage = message
+    this.lastStderrAt = now
+    this.log(`[Python stderr] ${message}`)
+  }
+
+  private getPythonRuntimeEnv(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
+    return {
+      ...process.env,
+      PYTHONUNBUFFERED: '1',
+      // Keep tokenizer/runtime helper threads bounded by default.
+      TOKENIZERS_PARALLELISM: process.env.TOKENIZERS_PARALLELISM ?? 'false',
+      OTTO_CPU_THREAD_LIMIT: process.env.OTTO_CPU_THREAD_LIMIT ?? DEFAULT_CPU_THREAD_LIMIT,
+      ...overrides,
+    }
+  }
+
+  private resolvePythonNiceValue(): number | null {
+    const raw = process.env.OTTO_PYTHON_NICE
+    if (!raw || raw.trim() === '') {
+      return DEFAULT_PYTHON_NICE
+    }
+
+    const parsed = Number.parseInt(raw, 10)
+    if (!Number.isFinite(parsed) || Number.isNaN(parsed) || parsed <= 0) {
+      return null
+    }
+
+    return parsed
   }
 
   /**
@@ -90,37 +145,53 @@ export class PythonBridge extends EventEmitter {
 
     // In production, use bundled PyInstaller executable
     // In development, use system Python with -m app.ipc_server
+    const niceValue = this.resolvePythonNiceValue()
+
     if (app.isPackaged) {
       const backendPath = this.findBundledBackend()
       const helperPath = path.join(process.resourcesPath, 'bin', 'courier-audio-helper')
+      const env = this.getPythonRuntimeEnv({
+        OTTO_AUDIO_HELPER: helperPath,
+      })
       this.log(`[PythonBridge] Starting bundled backend: ${backendPath}`)
       this.log(`[PythonBridge] Audio helper path: ${helperPath}`)
       this.log(`[PythonBridge] Backend exists: ${fs.existsSync(backendPath)}`)
       this.log(`[PythonBridge] Helper exists: ${fs.existsSync(helperPath)}`)
+      this.log(`[PythonBridge] Runtime CPU thread limit: ${env.OTTO_CPU_THREAD_LIMIT}`)
 
-      this.process = spawn(backendPath, [], {
+      const command = niceValue ? 'nice' : backendPath
+      const args = niceValue ? ['-n', String(niceValue), backendPath] : []
+      if (niceValue) {
+        this.log(`[PythonBridge] Applying process nice level: ${niceValue}`)
+      }
+
+      this.process = spawn(command, args, {
         cwd: path.dirname(backendPath),
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: {
-          ...process.env,
-          OTTO_AUDIO_HELPER: helperPath,
-        },
+        env,
       })
     } else {
       // Development mode: use system Python
       const pythonPath = this.findPythonPath()
       const appDir = this.findAppDir()
+      const env = this.getPythonRuntimeEnv()
 
       this.log(`[PythonBridge] Starting Python from ${pythonPath}`)
       this.log(`[PythonBridge] App directory: ${appDir}`)
+      this.log(`[PythonBridge] Runtime CPU thread limit: ${env.OTTO_CPU_THREAD_LIMIT}`)
 
-      this.process = spawn(pythonPath, ['-u', '-m', 'app.ipc_server'], {
+      const command = niceValue ? 'nice' : pythonPath
+      const args = niceValue
+        ? ['-n', String(niceValue), pythonPath, '-u', '-m', 'app.ipc_server']
+        : ['-u', '-m', 'app.ipc_server']
+      if (niceValue) {
+        this.log(`[PythonBridge] Applying process nice level: ${niceValue}`)
+      }
+
+      this.process = spawn(command, args, {
         cwd: appDir,
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: {
-          ...process.env,
-          PYTHONUNBUFFERED: '1',
-        },
+        env,
       })
     }
 
@@ -134,7 +205,11 @@ export class PythonBridge extends EventEmitter {
 
     // Handle stderr (debug output)
     this.process.stderr!.on('data', (data) => {
-      this.log(`[Python stderr] ${data.toString().trim()}`)
+      const message = data.toString().trim()
+      if (!message) {
+        return
+      }
+      this.handleStderrMessage(message)
     })
 
     // Handle process exit
@@ -313,6 +388,11 @@ export class PythonBridge extends EventEmitter {
   }
 
   private cleanup(): void {
+    if (this.suppressedStderrCount > 0) {
+      this.log(`[Python stderr] (suppressed ${this.suppressedStderrCount} duplicate lines)`)
+      this.suppressedStderrCount = 0
+    }
+
     if (this.process) {
       try {
         this.process.kill()

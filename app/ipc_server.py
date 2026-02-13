@@ -35,6 +35,37 @@ from .constants import (
     SUPPORTED_ENHANCEMENT_MODEL_ID,
 )
 
+SUPPORTED_PERFORMANCE_MODES = ("balanced", "low_cpu")
+ENHANCEMENT_ENABLED = False
+PERFORMANCE_PRESETS = {
+    "balanced": {
+        "beam_size": 5,
+        "cpu_threads": 4,
+        "enhance_cpu_threads": 2,
+        "enhance_temperature": 0.2,
+        "enhance_top_p": 0.8,
+        "enhance_max_tokens": 900,
+        "enhance_chunk_window_minutes": 10,
+        "enhance_chunk_min_duration_minutes": 15,
+        "enhance_chunk_max_count": 24,
+        "enhance_chunk_retry_attempts": 1,
+        "enhance_transcript_char_limit": 40000,
+    },
+    "low_cpu": {
+        "beam_size": 2,
+        "cpu_threads": 2,
+        "enhance_cpu_threads": 1,
+        "enhance_temperature": 0.15,
+        "enhance_top_p": 0.75,
+        "enhance_max_tokens": 320,
+        "enhance_chunk_window_minutes": 20,
+        "enhance_chunk_min_duration_minutes": 20,
+        "enhance_chunk_max_count": 16,
+        "enhance_chunk_retry_attempts": 1,
+        "enhance_transcript_char_limit": 18000,
+    },
+}
+
 
 @dataclass
 class Settings:
@@ -43,6 +74,7 @@ class Settings:
     whisper_model: str = "medium"
     mlx_model: str = DEFAULT_MLX_MODEL
     recording_threshold: int = 30  # Minimum recording duration in seconds
+    performance_mode: str = "low_cpu"
 
 
 class IPCServer:
@@ -150,6 +182,32 @@ class IPCServer:
     def _is_supported_enhancement_model(self, model_id: Any) -> bool:
         return model_id == SUPPORTED_ENHANCEMENT_MODEL_ID
 
+    def _is_supported_performance_mode(self, mode: Any) -> bool:
+        return mode in SUPPORTED_PERFORMANCE_MODES
+
+    def _get_performance_preset(self) -> dict[str, int]:
+        return PERFORMANCE_PRESETS.get(self.settings.performance_mode, PERFORMANCE_PRESETS["balanced"])
+
+    def _apply_runtime_thread_limit(self, cpu_threads: int) -> None:
+        cpu_threads = max(1, int(cpu_threads))
+        thread_limit_envs = [
+            "OMP_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "VECLIB_MAXIMUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+            "BLIS_NUM_THREADS",
+            "OTTO_CPU_THREAD_LIMIT",
+        ]
+        for key in thread_limit_envs:
+            os.environ[key] = str(cpu_threads)
+
+        try:
+            import torch
+            torch.set_num_threads(cpu_threads)
+        except Exception:
+            pass
+
     # --- Basic handlers ---
 
     def _handle_initialize(self, request: Request):
@@ -184,13 +242,16 @@ class IPCServer:
         self.settings.language = SUPPORTED_TRANSCRIPTION_LANGUAGE
         if not self._is_supported_enhancement_model(self.settings.mlx_model):
             self.settings.mlx_model = SUPPORTED_ENHANCEMENT_MODEL_ID
+        if not self._is_supported_performance_mode(self.settings.performance_mode):
+            self.settings.performance_mode = "balanced"
 
         self.writer.send_result(request.id, {
             "language": self.settings.language,
             "whisperModel": self.settings.whisper_model,
             "mlxModel": self.settings.mlx_model,
             "availableModels": [m[0] for m in WHISPER_MODELS],
-            "recordingThreshold": self.settings.recording_threshold
+            "recordingThreshold": self.settings.recording_threshold,
+            "performanceMode": self.settings.performance_mode,
         })
 
     def _handle_set_settings(self, request: Request):
@@ -221,6 +282,21 @@ class IPCServer:
             self._mlx_model_path = self._model_manager.get_model_path(self.settings.mlx_model)
         if "recordingThreshold" in params:
             self.settings.recording_threshold = params["recordingThreshold"]
+        if "performanceMode" in params:
+            if not self._is_supported_performance_mode(params["performanceMode"]):
+                self.writer.send_error(
+                    request.id,
+                    ErrorCode.INVALID_PARAMS,
+                    f"Performance mode must be one of: {', '.join(SUPPORTED_PERFORMANCE_MODES)}."
+                )
+                return
+            self.settings.performance_mode = params["performanceMode"]
+            preset = self._get_performance_preset()
+            self._apply_runtime_thread_limit(preset["cpu_threads"])
+            _debug(
+                f"Applied performance mode '{self.settings.performance_mode}' "
+                f"(beam_size={preset['beam_size']}, cpu_threads={preset['cpu_threads']})"
+            )
 
         self.writer.send_result(request.id, {"ok": True})
 
@@ -401,10 +477,23 @@ class IPCServer:
 
         language = SUPPORTED_TRANSCRIPTION_LANGUAGE
         request_id = request.id
-        _debug(f"Starting transcription: language={language}, model={model}, audio_length={len(self.audio_buffer)}")
+        preset = self._get_performance_preset()
+        beam_size = preset["beam_size"]
+        cpu_threads = preset["cpu_threads"]
+        self._apply_runtime_thread_limit(cpu_threads)
+        _debug(
+            f"Starting transcription: language={language}, model={model}, "
+            f"audio_length={len(self.audio_buffer)}, performance_mode={self.settings.performance_mode}, "
+            f"beam_size={beam_size}, cpu_threads={cpu_threads}"
+        )
 
         # Create transcriber with current settings
-        config = TranscriberConfig(model_size=model, language=language)
+        config = TranscriberConfig(
+            model_size=model,
+            language=language,
+            beam_size=beam_size,
+            cpu_threads=cpu_threads,
+        )
         self.transcriber = Transcriber(config)
 
         def on_complete(transcript: str, transcript_segments: list[dict[str, float | str]]):
@@ -450,6 +539,14 @@ class IPCServer:
 
     def _handle_enhance_notes(self, request: Request):
         """Enhance notes with MLX LLM."""
+        if not ENHANCEMENT_ENABLED:
+            self.writer.send_error(
+                request.id,
+                ErrorCode.FEATURE_DISABLED,
+                "Enhancement is disabled. Otto currently supports transcription only."
+            )
+            return
+
         params = request.params or {}
         notes = params.get("notes", "")
         transcript = params.get("transcript", self.transcript)
@@ -494,18 +591,42 @@ class IPCServer:
             return
 
         request_id = request.id
+        preset = self._get_performance_preset()
+        enhancement_cpu_threads = preset["enhance_cpu_threads"]
+        self._apply_runtime_thread_limit(enhancement_cpu_threads)
 
-        def on_token(token: str):
-            try:
-                self.writer.send_stream(request_id, {"token": token}, done=False)
-            except Exception as e:
-                _debug(f"Error sending token: {e}")
+        transcript_char_limit = preset["enhance_transcript_char_limit"]
+        if (
+            transcript
+            and isinstance(transcript, str)
+            and transcript_char_limit > 0
+            and len(transcript) > transcript_char_limit
+        ):
+            _debug(
+                f"Trimming enhancement transcript from {len(transcript)} to "
+                f"{transcript_char_limit} chars for responsiveness"
+            )
+            transcript = transcript[-transcript_char_limit:]
+            if transcript_segments:
+                transcript_segments = None
+                _debug("Dropped transcript segments after transcript trim")
+
+        _debug(
+            "Enhancement performance preset "
+            f"(mode={self.settings.performance_mode}, enhancement_cpu_threads={enhancement_cpu_threads}, "
+            f"max_tokens={preset['enhance_max_tokens']}, "
+            f"chunk_window_minutes={preset['enhance_chunk_window_minutes']}, "
+            f"chunk_min_duration_minutes={preset['enhance_chunk_min_duration_minutes']}, "
+            f"chunk_max_count={preset['enhance_chunk_max_count']}, "
+            f"chunk_retry_attempts={preset['enhance_chunk_retry_attempts']}, "
+            f"transcript_char_limit={preset['enhance_transcript_char_limit']})"
+        )
 
         def on_complete(full_response: str):
             _debug(f"Enhancement complete: {len(full_response)} chars")
             self._mlx_notes_generator = None
             try:
-                self.writer.send_stream(request_id, {"complete": True}, done=True)
+                self.writer.send_result(request_id, {"complete": True, "notes": full_response})
             except Exception as e:
                 _debug(f"Error sending complete: {e}")
 
@@ -526,14 +647,22 @@ class IPCServer:
             self.writer.send_error(request_id, ErrorCode.INTERNAL_ERROR, f"MLX enhancement failed: {error}")
 
         try:
-            # Configure MLX with the selected model
-            mlx_config = MLXConfig(model_path=mlx_model_path)
+            # Configure MLX with the selected model and active performance preset
+            mlx_config = MLXConfig(
+                model_path=mlx_model_path,
+                temperature=float(preset.get("enhance_temperature", 0.2)),
+                top_p=float(preset.get("enhance_top_p", 0.8)),
+                max_tokens=preset["enhance_max_tokens"],
+                chunk_window_minutes=preset["enhance_chunk_window_minutes"],
+                chunk_min_duration_minutes=preset["enhance_chunk_min_duration_minutes"],
+                chunk_max_count=preset["enhance_chunk_max_count"],
+                chunk_retry_attempts=preset["enhance_chunk_retry_attempts"],
+            )
             _debug(f"Creating MLX generator with config: {mlx_config}")
 
             # Create and start MLX generator
             self._mlx_notes_generator = MLXNotesGenerator(
                 config=mlx_config,
-                on_progress=on_token,
                 on_complete=on_complete,
                 on_error=on_mlx_error
             )
@@ -546,9 +675,6 @@ class IPCServer:
                 user_title,
                 transcript_segments=transcript_segments,
             )
-
-            # Send acknowledgment
-            self.writer.send_stream(request_id, {"status": "started", "backend": "mlx", "model": self.settings.mlx_model}, done=False)
         except Exception as e:
             _debug(f"Exception in MLX setup: {e}")
             import traceback

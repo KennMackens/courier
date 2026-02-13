@@ -57,52 +57,6 @@ export function registerIpcHandlers(
     )
   })
 
-  ipcMain.handle('python:enhanceNotes', async (_, params) => {
-    return python.requestWithStream(
-      'enhanceNotes',
-      params,
-      (data) => {
-        mainWindow.webContents.send('python:enhanceNotes:token', data)
-      }
-    )
-  })
-
-  // --- Model management handlers ---
-
-  ipcMain.handle('python:downloadModel', async (_, params) => {
-    return python.requestWithStream(
-      'downloadModel',
-      params,
-      (data) => {
-        mainWindow.webContents.send('python:downloadModel:progress', data)
-      }
-    )
-  })
-
-  ipcMain.handle('python:cancelDownload', async () => {
-    return python.request('cancelDownload')
-  })
-
-  ipcMain.handle('python:isModelDownloaded', async (_, params) => {
-    return python.request('isModelDownloaded', params)
-  })
-
-  ipcMain.handle('python:getModelStatus', async (_, params) => {
-    return python.request('getModelStatus', params)
-  })
-
-  ipcMain.handle('python:deleteModel', async (_, params) => {
-    return python.request('deleteModel', params)
-  })
-
-  ipcMain.handle('python:getAvailableModels', async () => {
-    return python.request('getAvailableModels')
-  })
-
-  ipcMain.handle('python:getDownloadedModels', async () => {
-    return python.request('getDownloadedModels')
-  })
-
   // --- System helpers ---
   ipcMain.handle('system:openMicSettings', async () => {
     await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone')
@@ -134,15 +88,6 @@ export function removeIpcHandlers(): void {
     'python:startRecording',
     'python:stopRecording',
     'python:transcribe',
-    'python:enhanceNotes',
-    // Model management
-    'python:downloadModel',
-    'python:cancelDownload',
-    'python:isModelDownloaded',
-    'python:getModelStatus',
-    'python:deleteModel',
-    'python:getAvailableModels',
-    'python:getDownloadedModels',
   ]
 
   for (const channel of handlers) {

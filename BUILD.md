@@ -28,7 +28,7 @@ cd /path/to/courier
 
 This creates `desktop/build/python-backend/` containing:
 - `python-backend` - Standalone executable (~55MB)
-- `_internal/` - All bundled dependencies (MLX, faster-whisper, scipy, etc.) (~850MB)
+- `_internal/` - Bundled runtime dependencies (typically ~250-350MB after COU-98 optimizations)
 
 **When to rebuild Python backend:**
 - After any changes to `app/*.py` files
@@ -130,6 +130,20 @@ The Python backend is bundled as a **standalone executable** using PyInstaller:
 - Entry point: `ipc_main.py` (wrapper for `app.ipc_server`)
 - Audio helper: `courier-audio-helper` (Swift binary for Core Audio capture)
 
+**Bundle optimization guardrails (COU-98):**
+- Keep `pyinstaller.spec` hidden imports explicit and minimal; avoid broad `collect_submodules(...)` on heavy libraries.
+- Exclude optional training/GUI/notebook frameworks (torch/tensorflow/jupyter/matplotlib) from bundled runtime.
+- Treat backend size and file count as release gates before notarization.
+- Current measured reference (February 12, 2026): `899MB / 7055 files` -> `277MB / 2224 files`.
+
+Measure backend footprint after each build:
+
+```bash
+du -sh desktop/build/python-backend desktop/build/python-backend/_internal
+find desktop/build/python-backend -type f | wc -l
+du -sm desktop/build/python-backend/_internal/* | sort -nr | head -n 20
+```
+
 **How it works:**
 1. `build_python.sh` runs PyInstaller with `pyinstaller.spec`
 2. PyInstaller bundles Python + all dependencies into `desktop/build/python-backend/`
@@ -162,6 +176,56 @@ cd desktop
 rm -rf release/mac-arm64 release/*.dmg
 npm run build && npx electron-builder --mac --arm64
 ```
+
+### Signed + Notarized Release Checklist (Each Update)
+
+Run this sequence for every production update you distribute:
+
+```bash
+# 0) from repo root
+cd /Users/kennmackens/Desktop/courier
+
+# 1) compile/bundle Python backend
+./build_python.sh
+
+# 2) build desktop app
+cd desktop
+npm run build
+
+# 3) confirm signing identity exists (must show Developer ID Application)
+security find-identity -v -p codesigning ~/Library/Keychains/login.keychain-db
+
+# 4) set notarization credentials
+export APPLE_API_KEY_ID="YOUR_KEY_ID"
+export APPLE_API_ISSUER="YOUR_ISSUER_ID"
+export APPLE_API_KEY_PATH="$HOME/.keys/AuthKey_XXXXXX.p8"
+# optional fallback if signing identity auto-detection fails:
+# export CSC_NAME="Developer ID Application: Kenn Mackens (WXW99U972S)"
+
+# 5) package mac arm64 build (DMG + app)
+npx electron-builder --mac --arm64
+
+# 6) derive DMG path from app version
+VERSION=$(node -p "require('./package.json').version")
+DMG="release/Otto-${VERSION}-arm64.dmg"
+
+# 7) notarize DMG
+xcrun notarytool submit "$DMG" \
+  --key "$APPLE_API_KEY_PATH" \
+  --key-id "$APPLE_API_KEY_ID" \
+  --issuer "$APPLE_API_ISSUER" \
+  --wait
+
+# 8) staple notarization ticket to DMG
+xcrun stapler staple "$DMG"
+
+# 9) verify signing + notarization
+codesign --verify --deep --strict --verbose=2 "release/mac-arm64/Otto.app"
+spctl --assess --type execute -v "release/mac-arm64/Otto.app"
+xcrun stapler validate "$DMG"
+```
+
+If step 3 returns `0 valid identities found`, stop and fix certificate/private-key pairing in your login keychain before continuing.
 
 ## Output
 

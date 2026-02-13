@@ -467,6 +467,8 @@ Geef alleen markdown bullet points met:
 - Beslissingen
 - Actiepunten
 - Open vragen (indien aanwezig)
+- Gebruik uitsluitend informatie uit dit fragment.
+- Verzin geen feiten; markeer onduidelijke details als "Onbekend".
 
 Fragment {chunk_index}/{total_chunks}
 Tijd: {start_label} - {end_label}
@@ -480,6 +482,8 @@ Return markdown bullet points only with:
 - Decisions
 - Action items
 - Open questions (if any)
+- Use only facts present in this chunk.
+- Do not invent details; mark unclear items as "Unknown".
 
 Chunk {chunk_index}/{total_chunks}
 Time: {start_label} - {end_label}
@@ -535,13 +539,9 @@ TRANSCRIPT:
                 # Note: Don't send "Loading model..." through on_progress as it would
                 # be concatenated to the notes. The frontend handles loading state separately.
 
-            # Generate with streaming using proper role separation
-            full_response = []
-
             def handle_token(token: str):
                 if self._stop_event.is_set():
                     raise InterruptedError("Generation cancelled")
-                full_response.append(token)
                 if self.on_progress:
                     self.on_progress(token)
 
@@ -612,11 +612,15 @@ MEETING TRANSCRIPT (may contain errors):
 {transcript}"""
 
             _debug("Starting MLX generation with system/user role separation...")
-            self.client.generate(user_content, on_token=handle_token, system_prompt=system_prompt)
-            _debug(f"MLX generation finished: {len(full_response)} tokens")
+            generated_response = self.client.generate(
+                user_content,
+                on_token=handle_token if self.on_progress else None,
+                system_prompt=system_prompt
+            )
+            _debug(f"MLX generation finished: {len(generated_response)} chars")
 
             if self.on_complete:
-                self.on_complete("".join(full_response))
+                self.on_complete(generated_response)
 
         except InterruptedError:
             _debug("Generation cancelled by user")

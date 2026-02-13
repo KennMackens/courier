@@ -31,6 +31,10 @@ interface UseTranscriptionOptions {
   onError?: (error: string) => void
 }
 
+const UI_PROGRESS_UPDATE_INTERVAL_MS = 2000
+const UI_PARTIAL_UPDATE_INTERVAL_MS = 2000
+const UI_PROGRESS_MIN_DELTA = 2
+
 export function useTranscription(options: UseTranscriptionOptions = {}) {
   const { onProgress, onComplete, onError } = options
 
@@ -45,6 +49,9 @@ export function useTranscription(options: UseTranscriptionOptions = {}) {
   })
 
   const unsubscribeRef = useRef<(() => void) | null>(null)
+  const lastProgressUiUpdateAtRef = useRef(0)
+  const lastProgressValueRef = useRef(0)
+  const lastPartialUiUpdateAtRef = useRef(0)
 
   // Setup progress listener
   useEffect(() => {
@@ -52,12 +59,38 @@ export function useTranscription(options: UseTranscriptionOptions = {}) {
       onProgress?.(progress)
 
       if (progress.status === "transcribing") {
+        const nextProgress = Math.max(0, progress.progress || 0)
+        const now = Date.now()
+        const progressJumped = Math.abs(nextProgress - lastProgressValueRef.current) >= UI_PROGRESS_MIN_DELTA
+        const intervalElapsed = now - lastProgressUiUpdateAtRef.current >= UI_PROGRESS_UPDATE_INTERVAL_MS
+        const shouldUpdate =
+          lastProgressUiUpdateAtRef.current === 0 ||
+          progressJumped ||
+          intervalElapsed ||
+          nextProgress >= 100
+
+        if (!shouldUpdate) {
+          return
+        }
+
+        lastProgressUiUpdateAtRef.current = now
+        lastProgressValueRef.current = nextProgress
+
         setState((prev) => ({
           ...prev,
           status: "transcribing",
-          progress: progress.progress || 0,
+          progress: nextProgress,
         }))
       } else if (progress.status === "partial" && progress.partial) {
+        const now = Date.now()
+        if (
+          lastPartialUiUpdateAtRef.current !== 0 &&
+          now - lastPartialUiUpdateAtRef.current < UI_PARTIAL_UPDATE_INTERVAL_MS
+        ) {
+          return
+        }
+        lastPartialUiUpdateAtRef.current = now
+
         setState((prev) => ({
           ...prev,
           transcript: progress.partial || "",
@@ -72,6 +105,10 @@ export function useTranscription(options: UseTranscriptionOptions = {}) {
   // Transcribe audio
   const transcribe = useCallback(
     async (params?: { language?: string; model?: string }) => {
+      lastProgressUiUpdateAtRef.current = 0
+      lastProgressValueRef.current = 0
+      lastPartialUiUpdateAtRef.current = 0
+
       setState((prev) => ({
         ...prev,
         status: "transcribing",
@@ -93,6 +130,8 @@ export function useTranscription(options: UseTranscriptionOptions = {}) {
           totalTranscriptSegments,
           progress: 100,
         }))
+        lastProgressUiUpdateAtRef.current = Date.now()
+        lastProgressValueRef.current = 100
 
         onComplete?.(result.totalTranscript || result.transcript || "", totalTranscriptSegments)
         return result
@@ -124,6 +163,10 @@ export function useTranscription(options: UseTranscriptionOptions = {}) {
 
   // Clear transcript
   const clearTranscript = useCallback(() => {
+    lastProgressUiUpdateAtRef.current = 0
+    lastProgressValueRef.current = 0
+    lastPartialUiUpdateAtRef.current = 0
+
     setState({
       status: "idle",
       transcript: "",

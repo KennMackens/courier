@@ -7,6 +7,7 @@ export interface Settings {
   mlxModel: string
   availableModels: string[]
   recordingThreshold: number // Minimum recording duration in seconds
+  performanceMode: 'balanced' | 'low_cpu'
 }
 
 // Enhancement status type
@@ -62,44 +63,6 @@ export interface MeetingListOptions {
   search?: string
 }
 
-// Model management types
-export interface AvailableModel {
-  id: string
-  name: string
-  size_gb: number
-  description: string
-}
-
-export interface DownloadedModel {
-  modelId: string
-  path: string
-  size: string
-  sizeBytes: number
-  downloadDate: string | null
-}
-
-export interface ModelStatus {
-  exists: boolean
-  modelId: string
-  path?: string
-  size?: string
-  sizeBytes?: number
-  downloadDate?: string | null
-  version?: string | null
-}
-
-export interface DownloadProgress {
-  status: string
-  modelId?: string
-  progress?: number
-  downloaded?: string
-  total?: string
-  speed?: string
-  complete?: boolean
-  cancelled?: boolean
-  path?: string
-}
-
 export interface TranscriptSegment {
   start: number
   end: number
@@ -143,14 +106,6 @@ export interface PythonAPI {
     totalTranscriptSegments?: TranscriptSegment[]
   }>
 
-  // Note enhancement
-  enhanceNotes: (params: {
-    notes: string
-    transcript?: string
-    language?: string
-    transcriptSegments?: TranscriptSegment[]
-  }) => Promise<{ complete: boolean }>
-
   // Settings
   getSettings: () => Promise<Settings>
   setSettings: (settings: Partial<Settings>) => Promise<{ ok: boolean }>
@@ -158,22 +113,11 @@ export interface PythonAPI {
   // Session
   resetSession: () => Promise<{ ok: boolean }>
 
-  // Model management
-  downloadModel: (params: { modelId: string }) => Promise<{ complete?: boolean; alreadyDownloaded?: boolean; path?: string }>
-  cancelDownload: () => Promise<{ cancelled: boolean }>
-  isModelDownloaded: (params: { modelId: string }) => Promise<{ downloaded: boolean }>
-  getModelStatus: (params: { modelId: string }) => Promise<ModelStatus>
-  deleteModel: (params: { modelId: string }) => Promise<{ deleted: boolean }>
-  getAvailableModels: () => Promise<{ models: AvailableModel[] }>
-  getDownloadedModels: () => Promise<{ models: DownloadedModel[] }>
-
   // Event listeners
   onTranscribeProgress: (callback: (data: { status?: string; progress?: number; partial?: string }) => void) => () => void
-  onEnhanceToken: (callback: (data: { token: string; status?: string }) => void) => () => void
   onRecordingError: (callback: (data: { message: string }) => void) => () => void
   onRecordingWarning: (callback: (data: { message: string }) => void) => () => void
   onError: (callback: (error: { message: string }) => void) => () => void
-  onDownloadProgress: (callback: (data: DownloadProgress) => void) => () => void
 }
 
 // Database API interface

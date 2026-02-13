@@ -5,10 +5,11 @@ export type SettingsStatusTone = "ready" | "warning" | "critical" | "neutral" | 
 
 interface SettingsStatusCardProps {
   title: string
-  description: string
+  description?: string
   tone?: SettingsStatusTone
   icon?: React.ReactNode
   badgeLabel?: string
+  badgePlacement?: "inline" | "below-title"
   action?: React.ReactNode
   className?: string
 }
@@ -26,7 +27,7 @@ const toneClasses: Record<
   ready: {
     container: "bg-white border-slate-6 dark:bg-black",
     stripe: "bg-jade-9",
-    iconBg: "bg-jade-4",
+    iconBg: "",
     title: "text-jade-12",
     badge: "text-jade-11 border-jade-7 bg-jade-3",
   },
@@ -66,6 +67,7 @@ export function SettingsStatusCard({
   tone = "neutral",
   icon,
   badgeLabel,
+  badgePlacement = "inline",
   action,
   className,
 }: SettingsStatusCardProps) {
@@ -91,13 +93,20 @@ export function SettingsStatusCard({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <p className={cn("text-sm font-semibold", classes.title)}>{title}</p>
-            {badgeLabel ? (
+            {badgeLabel && badgePlacement === "inline" ? (
               <span className={cn("shrink-0 rounded-full border px-2 py-0.5 text-[11px]", classes.badge)}>
                 {badgeLabel}
               </span>
             ) : null}
           </div>
-          <p className="text-xs text-slate-11">{description}</p>
+          {badgeLabel && badgePlacement === "below-title" ? (
+            <div className="mt-1">
+              <span className={cn("inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[11px]", classes.badge)}>
+                {badgeLabel}
+              </span>
+            </div>
+          ) : null}
+          {description ? <p className="text-xs text-slate-11">{description}</p> : null}
         </div>
       </div>
 

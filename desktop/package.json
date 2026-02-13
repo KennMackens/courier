@@ -64,6 +64,7 @@
   "build": {
     "appId": "com.otto.app",
     "productName": "Otto",
+    "afterSign": "scripts/after-sign.js",
     "directories": {
       "output": "release"
     },
@@ -71,7 +72,11 @@
       "target": [
         "dmg"
       ],
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "scripts/entitlements.mac.plist",
+      "entitlementsInherit": "scripts/entitlements.mac.inherit.plist"
     },
     "files": [
       "dist/**/*",

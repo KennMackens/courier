@@ -6,55 +6,36 @@ This bundles the Python IPC server with all ML dependencies (MLX, Whisper, etc.)
 into a standalone executable for macOS.
 """
 
-import sys
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files
 
 block_cipher = None
 
-# Collect all submodules for complex packages
+# Keep hidden imports minimal; broad collect_submodules pulls in large optional stacks.
 hiddenimports = [
-    # MLX and ML packages
-    *collect_submodules('mlx'),
-    *collect_submodules('mlx_lm'),
-    *collect_submodules('faster_whisper'),
-    *collect_submodules('transformers'),
-    *collect_submodules('tokenizers'),
-    *collect_submodules('huggingface_hub'),
-    *collect_submodules('safetensors'),
-    # Scientific computing
-    *collect_submodules('numpy'),
-    *collect_submodules('scipy'),
-    # Standard library modules that might be missed
-    'json',
-    'sys',
-    'os',
-    'signal',
-    'threading',
-    'queue',
-    'dataclasses',
-    'typing',
-    'pathlib',
-    'tempfile',
-    'shutil',
-    'subprocess',
-    'struct',
-    'wave',
     # App modules
     'app',
+    'app.constants',
     'app.ipc_server',
     'app.ipc_protocol',
     'app.recorder',
     'app.transcriber',
     'app.mlx_inference',
     'app.model_manager',
-    'app.ollama',
+    'app.prompts',
+    # Runtime-loaded ML modules
+    'mlx',
+    'mlx.core',
+    'mlx_lm',
+    'mlx_lm.sample_utils',
+    'faster_whisper',
+    'tokenizers',
+    'huggingface_hub',
+    'safetensors',
 ]
 
-# Collect data files for packages that need them
+# Keep only package metadata/resources needed at runtime.
 datas = [
-    *collect_data_files('mlx'),
-    *collect_data_files('faster_whisper'),
-    *collect_data_files('transformers'),
+    *collect_data_files('mlx_lm'),
     *collect_data_files('tokenizers'),
     *collect_data_files('huggingface_hub'),
 ]
@@ -80,6 +61,29 @@ a = Analysis(
         'pytest',
         'unittest',
         '_pytest',
+        # Exclude optional ML/training backends not used by Otto runtime
+        'torch',
+        'torchvision',
+        'torchaudio',
+        'torchtext',
+        'tensorflow',
+        'keras',
+        'jax',
+        'jaxlib',
+        'flax',
+        # Exclude notebook/visualization stacks
+        'IPython',
+        'ipykernel',
+        'jupyter',
+        'notebook',
+        'matplotlib',
+        'PIL',
+        # Exclude optional scientific tooling and tests
+        'numba',
+        'llvmlite',
+        'scipy',
+        'numpy.tests',
+        'scipy.tests',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

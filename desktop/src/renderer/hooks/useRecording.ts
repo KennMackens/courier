@@ -34,6 +34,11 @@ export function useRecording(options: UseRecordingOptions = {}) {
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const startTimeRef = useRef<number | null>(null)
   const permissionPollRef = useRef<NodeJS.Timeout | null>(null)
+  const onErrorRef = useRef(onError)
+  const onStoppedRef = useRef(onStopped)
+
+  onErrorRef.current = onError
+  onStoppedRef.current = onStopped
 
   // Listen for recording errors from Python
   useEffect(() => {
@@ -46,7 +51,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
         micStatus: "denied",
         micWarning: MIC_TOOLTIP,
       }))
-      onError?.(message)
+      onErrorRef.current?.(message)
 
       // Clear duration timer
       if (durationIntervalRef.current) {
@@ -68,7 +73,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
       unsubscribeError()
       unsubscribeWarning()
     }
-  }, [onError])
+  }, [])
 
   // Poll permission while recording to reflect mid-session changes
   useEffect(() => {
@@ -152,9 +157,9 @@ export function useRecording(options: UseRecordingOptions = {}) {
         error: errorMessage,
         micStatus: "unknown",
       }))
-      onError?.(errorMessage)
+      onErrorRef.current?.(errorMessage)
     }
-  }, [onError])
+  }, [])
 
   // Stop recording
   const stopRecording = useCallback(async () => {
@@ -175,7 +180,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
       }))
 
       if (result.stopped) {
-        onStopped?.(result.audioLength || 0, result.durationSec || 0)
+        onStoppedRef.current?.(result.audioLength || 0, result.durationSec || 0)
       }
 
       return result
@@ -186,10 +191,10 @@ export function useRecording(options: UseRecordingOptions = {}) {
         status: "idle",
         error: errorMessage,
       }))
-      onError?.(errorMessage)
+      onErrorRef.current?.(errorMessage)
       throw error
     }
-  }, [onError, onStopped])
+  }, [])
 
   // Reset state
   const reset = useCallback(() => {

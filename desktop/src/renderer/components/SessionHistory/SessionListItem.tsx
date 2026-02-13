@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from "react"
-import { Calendar, Clock, Trash2, Sparkles, AlertCircle } from "lucide-react"
+import { memo, useState, useRef, useEffect } from "react"
+import { Calendar, Clock, Trash2, Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Meeting } from "@/hooks/useSessionHistory"
 
@@ -20,20 +20,14 @@ interface SessionListItemProps {
     progress: number
     etaSeconds: number | null
   } | null
-  enhancementProgress?: {
-    currentId: string | null
-    queuePosition: number
-    progress?: number
-  } | null
 }
 
-export function SessionListItem({
+function SessionListItemComponent({
   meeting,
   isSelected,
   onClick,
   onDelete,
   transcriptionProgress,
-  enhancementProgress,
 }: SessionListItemProps) {
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 })
@@ -88,16 +82,9 @@ export function SessionListItem({
   // Get display title
   const title = meeting.title || `Meeting - ${formatDate(meeting.date_time)}`
 
-  // Enhancement status indicators
-  const isEnhancing = meeting.enhancement_status === 'enhancing'
-  const isPending = meeting.enhancement_status === 'pending'
-  const isFailed = meeting.enhancement_status === 'failed'
   const isNew = isNewMeeting(meeting.is_new)
   const isTranscribingThis = transcriptionProgress?.meetingId === meeting.id
   const transcribeProgress = isTranscribingThis ? Math.min(100, Math.max(0, transcriptionProgress?.progress ?? 0)) : 0
-  const isEnhancementCurrent = enhancementProgress?.currentId === meeting.id
-  const enhancementQueuePosition = enhancementProgress?.queuePosition ?? -1
-  const enhancementProgressPct = isEnhancementCurrent ? enhancementProgress?.progress ?? 0 : 0
 
   return (
     <>
@@ -105,9 +92,7 @@ export function SessionListItem({
         className={cn(
           "group relative w-full rounded-md transition-colors",
           "hover:bg-slate-3",
-          isSelected && "bg-slate-4 hover:bg-slate-4",
-          // Pulsing border during enhancement
-          isEnhancing && "ring-2 ring-jade-7 animate-pulse-border"
+          isSelected && "bg-slate-4 hover:bg-slate-4"
         )}
       >
         <button
@@ -134,24 +119,7 @@ export function SessionListItem({
                   {`Transcribing ${Math.round(transcribeProgress)}%`}
                 </span>
               )}
-              {isEnhancing && !isEnhancementCurrent && (
-                <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-jade-3 text-jade-11 rounded">
-                  <Sparkles className="h-2.5 w-2.5" />
-                  {enhancementQueuePosition > 0 ? `Queued ${enhancementQueuePosition}` : "Queued"}
-                </span>
-              )}
-              {isPending && (
-                <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-slate-3 text-slate-10 rounded">
-                  Pending
-                </span>
-              )}
-              {isFailed && (
-                <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-red-3 text-red-11 rounded">
-                  <AlertCircle className="h-2.5 w-2.5" />
-                  Failed
-                </span>
-              )}
-              {isNew && !isEnhancing && !isPending && (
+              {isNew && (
                 <span className="px-1.5 py-0.5 text-[10px] font-medium bg-pink-3 text-pink-11 rounded">
                   New
                 </span>
@@ -170,15 +138,6 @@ export function SessionListItem({
                   {formatDuration(meeting.duration)}
                 </span>
               )}
-            {isEnhancementCurrent && (
-              <span className="flex items-center gap-1 text-jade-11">
-                <Sparkles className="h-3 w-3" />
-                {enhancementProgressPct > 0 ? `Enhancing ${Math.round(enhancementProgressPct)}%` : "Enhancing…"}
-              </span>
-            )}
-              {!isEnhancementCurrent && enhancementQueuePosition > 0 && (
-                <span className="text-slate-10">{`Queue: ${enhancementQueuePosition}`}</span>
-              )}
             </div>
 
             {isTranscribingThis && (
@@ -190,18 +149,6 @@ export function SessionListItem({
                   />
                 ) : (
                   <div className="h-full w-1/3 min-w-[24%] bg-gradient-to-r from-sky-6 via-sky-9 to-sky-6 animate-pulse" />
-                )}
-              </div>
-            )}
-            {isEnhancementCurrent && (
-              <div className="mt-1 h-1.5 rounded-full bg-slate-4 overflow-hidden">
-                {enhancementProgressPct > 0 ? (
-                  <div
-                    className="h-full bg-jade-9 transition-all"
-                    style={{ width: `${Math.min(100, Math.max(0, enhancementProgressPct))}%` }}
-                  />
-                ) : (
-                  <div className="h-full w-1/3 min-w-[24%] bg-gradient-to-r from-jade-6 via-jade-9 to-jade-6 animate-pulse" />
                 )}
               </div>
             )}
@@ -248,3 +195,31 @@ export function SessionListItem({
     </>
   )
 }
+
+function areSessionListItemPropsEqual(prev: SessionListItemProps, next: SessionListItemProps): boolean {
+  const sameMeeting =
+    prev.meeting.id === next.meeting.id &&
+    prev.meeting.title === next.meeting.title &&
+    prev.meeting.date_time === next.meeting.date_time &&
+    prev.meeting.duration === next.meeting.duration &&
+    prev.meeting.is_new === next.meeting.is_new
+
+  const sameSelection = prev.isSelected === next.isSelected
+
+  const prevTranscriptionForRow =
+    prev.transcriptionProgress?.meetingId === prev.meeting.id
+      ? `${Math.round(prev.transcriptionProgress.progress)}:${prev.transcriptionProgress.etaSeconds ?? "none"}`
+      : "inactive"
+  const nextTranscriptionForRow =
+    next.transcriptionProgress?.meetingId === next.meeting.id
+      ? `${Math.round(next.transcriptionProgress.progress)}:${next.transcriptionProgress.etaSeconds ?? "none"}`
+      : "inactive"
+
+  return (
+    sameMeeting &&
+    sameSelection &&
+    prevTranscriptionForRow === nextTranscriptionForRow
+  )
+}
+
+export const SessionListItem = memo(SessionListItemComponent, areSessionListItemPropsEqual)

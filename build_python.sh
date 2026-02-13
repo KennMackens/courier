@@ -31,3 +31,8 @@ echo ""
 echo "To verify, run:"
 echo "  ./desktop/build/python-backend/python-backend"
 echo ""
+echo "Bundle size summary:"
+du -sh desktop/build/python-backend desktop/build/python-backend/_internal
+echo "File count:"
+find desktop/build/python-backend -type f | wc -l
+echo ""

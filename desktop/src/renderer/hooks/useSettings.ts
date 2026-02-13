@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
 
 export interface Settings {
   language: string
@@ -7,6 +7,7 @@ export interface Settings {
   availableModels: string[]
   theme: "light" | "dark" | "system"
   recordingThreshold: number // Minimum recording duration in seconds
+  performanceMode: "balanced" | "low_cpu"
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -16,6 +17,7 @@ const DEFAULT_SETTINGS: Settings = {
   availableModels: ["tiny", "base", "small", "medium", "large-v3"],
   theme: "system",
   recordingThreshold: 30, // Default 30 seconds
+  performanceMode: "low_cpu",
 }
 
 interface UseSettingsOptions {
@@ -30,6 +32,11 @@ export function useSettings(options: UseSettingsOptions = {}) {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const onErrorRef = useRef(onError)
+  const onSavedRef = useRef(onSaved)
+
+  onErrorRef.current = onError
+  onSavedRef.current = onSaved
 
   // Load settings on mount
   useEffect(() => {
@@ -48,14 +55,14 @@ export function useSettings(options: UseSettingsOptions = {}) {
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Failed to load settings"
         setError(errorMessage)
-        onError?.(errorMessage)
+        onErrorRef.current?.(errorMessage)
       } finally {
         setIsLoading(false)
       }
     }
 
     loadSettings()
-  }, [onError])
+  }, [])
 
   // Save settings
   const saveSettings = useCallback(
@@ -81,17 +88,17 @@ export function useSettings(options: UseSettingsOptions = {}) {
           ...newSettings,
         }))
 
-        onSaved?.()
+        onSavedRef.current?.()
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Failed to save settings"
         setError(errorMessage)
-        onError?.(errorMessage)
+        onErrorRef.current?.(errorMessage)
         throw err
       } finally {
         setIsSaving(false)
       }
     },
-    [onError, onSaved]
+    []
   )
 
   // Update single setting
@@ -114,19 +121,20 @@ export function useSettings(options: UseSettingsOptions = {}) {
         whisperModel: DEFAULT_SETTINGS.whisperModel,
         mlxModel: DEFAULT_SETTINGS.mlxModel,
         recordingThreshold: DEFAULT_SETTINGS.recordingThreshold,
+        performanceMode: DEFAULT_SETTINGS.performanceMode,
       })
 
       localStorage.setItem("otto-theme", DEFAULT_SETTINGS.theme)
       setSettingsState(DEFAULT_SETTINGS)
-      onSaved?.()
+      onSavedRef.current?.()
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Failed to reset settings"
       setError(errorMessage)
-      onError?.(errorMessage)
+      onErrorRef.current?.(errorMessage)
     } finally {
       setIsSaving(false)
     }
-  }, [onError, onSaved])
+  }, [])
 
   return {
     settings,
@@ -168,4 +176,10 @@ export const RECORDING_THRESHOLD_OPTIONS = [
   { value: 30, label: "30 seconds" },
   { value: 60, label: "1 minute" },
   { value: 120, label: "2 minutes" },
+] as const
+
+// CPU/performance presets for transcription runtime
+export const PERFORMANCE_MODE_OPTIONS = [
+  { value: "balanced", label: "Balanced", description: "Faster transcription, moderate CPU usage" },
+  { value: "low_cpu", label: "Low CPU", description: "Lower CPU load, slower transcription" },
 ] as const
